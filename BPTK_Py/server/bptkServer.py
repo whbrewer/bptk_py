@@ -51,9 +51,12 @@ class InstanceManager:
 
     def _get_instance_state(self, instance_uuid):
         instance = self._instances[instance_uuid]
-        session_state = copy.deepcopy(instance['instance'].session_state)
-        session_state["lock"] = False
-        return InstanceState(session_state, instance_uuid, instance["time"], instance["timeout"], session_state["step"])
+        session_state = copy.deepcopy(instance['instance'].session_state) if instance['instance'].session_state is not None else None
+        step=0
+        if session_state is not None:
+            session_state["lock"] = False
+            step=session_state["step"]
+        return InstanceState(session_state, instance_uuid, instance["time"], instance["timeout"], step)
             
     def get_instance_states(self):
         keys = list(self._instances.keys())
@@ -191,17 +194,19 @@ class BptkServer(Flask):
     """
     This class provides a Flask-based server that provides a REST-API for running bptk scenarios. The class inherts the properties and methods of Flask and doesn't expose any further public methods.
     """
-    def __init__(self, import_name, bptk_factory=None, external_state_adapter=None, bearer_token=None):
+    def __init__(self, import_name, bptk_factory=None, external_state_adapter=None, bearer_token=None, externalize_state_completely=False):
         """
         Initialize the server with the import name and the bptk.
         :param import_name: the name of the application package. Usually __name__. This helps locate the root_path for the blueprint.
         :param bptk: simulations made by the bptk.
+        :param externalize_state_completely: if True and external_state_adapter is provided, instances are deleted after every use to ensure statelessness
         """
         super(BptkServer, self).__init__(import_name)
         self._bptk = bptk_factory() if bptk_factory is not None else None
         self._external_state_adapter = external_state_adapter
         self._instance_manager = InstanceManager(bptk_factory)
         self._bearer_token = bearer_token
+        self._externalize_state_completely = externalize_state_completely and external_state_adapter is not None
 
         # Loading the full state on startup
         if external_state_adapter != None:
@@ -243,12 +248,38 @@ class BptkServer(Flask):
                 if token is None:
                     resp = make_response('{"Unauthorized": "Authentication Token is missing!"}', 401)
                     return resp
-                
+
                 if token != self._bearer_token:
                     resp = make_response('{"Unauthorized": "Authentication Token is wrong!"}', 401)
                     return resp
 
             return f(self, *args, **kwargs)
+        return decorated
+
+    @staticmethod
+    def auto_cleanup_instance(f):
+        @wraps(f)
+        def decorated(self, instance_uuid, *args, **kwargs):
+            try:
+                result = f(self, instance_uuid, *args, **kwargs)
+                if self._externalize_state_completely:
+                    # Save instance state to external storage before deleting
+                    instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                    if instance_state and self._external_state_adapter:
+                        self._external_state_adapter.save_instance(instance_state)
+                    self._instance_manager._delete_instance(instance_uuid)
+                return result
+            except Exception as e:
+                if self._externalize_state_completely:
+                    # Save instance state to external storage before deleting, even on exception
+                    try:
+                        instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                        if instance_state and self._external_state_adapter:
+                            self._external_state_adapter.save_instance(instance_state)
+                    except:
+                        pass  # Don't let save errors mask the original exception
+                    self._instance_manager._delete_instance(instance_uuid)
+                raise e
         return decorated
 
     @token_required
@@ -592,6 +623,11 @@ class BptkServer(Flask):
         instance_uuid = self._instance_manager.create_instance(**timeout)
 
         if instance_uuid is not None:
+            # If externalizing state completely, save the new instance to external storage
+            if self._externalize_state_completely and self._external_state_adapter:
+                instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                if instance_state:
+                    self._external_state_adapter.save_instance(instance_state)
             response_data = {"instance_uuid":instance_uuid,"timeout":timeout}
             resp = make_response(json.dumps(response_data), 200)
         else:
@@ -619,7 +655,13 @@ class BptkServer(Flask):
                 instances = content["instances"]
 
         for i in range(instances):
-            instance_uuids.append(self._instance_manager.create_instance(**timeout))
+            instance_uuid = self._instance_manager.create_instance(**timeout)
+            instance_uuids.append(instance_uuid)
+            # If externalizing state completely, save each new instance to external storage
+            if self._externalize_state_completely and self._external_state_adapter:
+                instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                if instance_state:
+                    self._external_state_adapter.save_instance(instance_state)
 
         response_data={"instance_uuids":instance_uuids,"timeout":timeout}
         
@@ -629,6 +671,7 @@ class BptkServer(Flask):
         return resp
 
     @token_required
+    @auto_cleanup_instance
     def _begin_session_resource(self, instance_uuid):
         """This endpoint starts a session for single step simulation. There can only be one session per instance at a time.
         Currently only System Dynamics scenarios are supported for both SD DSL and XMILE models.
@@ -714,6 +757,7 @@ class BptkServer(Flask):
         return resp
 
     @token_required
+    @auto_cleanup_instance
     def _end_session_resource(self, instance_uuid):
         """This endpoint ends a session for single step simulation and resets the internal cache.
         """
@@ -733,6 +777,7 @@ class BptkServer(Flask):
         return resp
 
     @token_required
+    @auto_cleanup_instance
     def _flat_session_results_resource(self,instance_uuid):
         """
         Returns the accumulated results of a session, from the first step to the last step that was run in a flat format.
@@ -746,6 +791,7 @@ class BptkServer(Flask):
         return self._session_results_resource(instance_uuid, True)
 
     @token_required
+    @auto_cleanup_instance
     def _session_results_resource(self,instance_uuid,flat=False):
         """
         Returns the accumulated results of a session, from the first step to the last step that was run.
@@ -766,6 +812,7 @@ class BptkServer(Flask):
         return resp
 
     @token_required
+    @auto_cleanup_instance
     def _run_step_resource(self, instance_uuid):
         """
         This endpoint advances the relevant scenarios by one timestep and returns the data for that timestep.
@@ -814,6 +861,7 @@ class BptkServer(Flask):
         return resp
 
     @token_required
+    @auto_cleanup_instance
     def _run_steps_resource(self, instance_uuid):
         """
         This endpoint advances the relevant scenarios by one timestep and returns the data for that timestep.
@@ -876,6 +924,7 @@ class BptkServer(Flask):
 
 
     @token_required
+    @auto_cleanup_instance
     def _stream_steps_resource(self, instance_uuid):
         """
         This endpoint is used to stream a simulation.
@@ -941,6 +990,7 @@ class BptkServer(Flask):
 
 
     @token_required
+    @auto_cleanup_instance
     def _keep_alive_resource(self,instance_uuid):
         """
         This endpoint sets the "last accessed time" of the instance to the current time to prevent the instance from timeing out.

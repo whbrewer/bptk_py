@@ -17,3 +17,6 @@ dist/
 build/
 _build
 test*.ipynb
+.env
+.claude
+/state
