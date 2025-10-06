@@ -27,9 +27,6 @@ class RedisAdapter(ExternalStateAdapter):
         """Generate Redis key for an instance."""
         return f"{self._key_prefix}:{instance_uuid}"
 
-    def _get_instances_set_key(self) -> str:
-        """Generate Redis key for the set of all instance UUIDs."""
-        return f"{self._key_prefix}:instances"
 
     def _load_instance(self, instance_uuid: str) -> InstanceState:
         """Load a single instance from Redis."""
@@ -55,11 +52,13 @@ class RedisAdapter(ExternalStateAdapter):
     def _load_state(self) -> list[InstanceState]:
         """Load all instances from Redis."""
         instances = []
-        instance_uuids = self._redis_client.smembers(self._get_instances_set_key())
+        pattern = f"{self._key_prefix}:*"
 
-        for instance_uuid in instance_uuids:
-            instance_uuid_str = instance_uuid.decode('utf-8') if isinstance(instance_uuid, bytes) else instance_uuid
-            instance_state = self._load_instance(instance_uuid_str)
+        for key in self._redis_client.scan_iter(match=pattern):
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+            # Extract UUID from key and load instance
+            instance_uuid = key_str.replace(f"{self._key_prefix}:", "")
+            instance_state = self._load_instance(instance_uuid)
             if instance_state is not None:
                 instances.append(instance_state)
 
@@ -68,13 +67,7 @@ class RedisAdapter(ExternalStateAdapter):
     def delete_instance(self, instance_uuid: str):
         """Delete an instance from Redis."""
         key = self._get_instance_key(instance_uuid)
-        instances_set_key = self._get_instances_set_key()
-
-        # Use pipeline for atomic operations
-        pipe = self._redis_client.pipeline()
-        pipe.delete(key)
-        pipe.srem(instances_set_key, instance_uuid)
-        pipe.execute()
+        self._redis_client.delete(key)
 
     def _save_instance(self, instance_state: InstanceState):
         """Save a single instance to Redis."""
@@ -92,12 +85,9 @@ class RedisAdapter(ExternalStateAdapter):
             }
 
             key = self._get_instance_key(instance_state.instance_id)
-            instances_set_key = self._get_instances_set_key()
 
-            # Store data and add to instances set atomically
-            pipe = self._redis_client.pipeline()
-            pipe.set(key, jsonpickle.dumps(redis_data))
-            pipe.sadd(instances_set_key, instance_state.instance_id)
+            # Store data
+            self._redis_client.set(key, jsonpickle.dumps(redis_data))
 
             # Set TTL based on timeout if specified
             if instance_state.timeout:
@@ -111,9 +101,7 @@ class RedisAdapter(ExternalStateAdapter):
                     instance_state.timeout.get("microseconds", 0) / 1000000
                 )
                 if timeout_seconds > 0:
-                    pipe.expire(key, int(timeout_seconds))
-
-            pipe.execute()
+                    self._redis_client.expire(key, int(timeout_seconds))
 
         except Exception as error:
             print(f"Error saving instance {instance_state.instance_id}: {error}")

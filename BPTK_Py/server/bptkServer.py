@@ -52,7 +52,7 @@ class InstanceManager:
     def _get_instance_state(self, instance_uuid):
         instance = self._instances[instance_uuid]
         session_state = copy.deepcopy(instance['instance'].session_state) if instance['instance'].session_state is not None else None
-        step=0
+        step=None
         if session_state is not None:
             session_state["lock"] = False
             step=session_state["step"]
@@ -207,12 +207,6 @@ class BptkServer(Flask):
         self._instance_manager = InstanceManager(bptk_factory)
         self._bearer_token = bearer_token
         self._externalize_state_completely = externalize_state_completely and external_state_adapter is not None
-
-        # Loading the full state on startup
-        if external_state_adapter != None:
-            result = self._external_state_adapter.load_state()
-            for instance_data in result:
-                self._instance_manager.reconstruct_instance(instance_data.instance_id, instance_data.timeout, instance_data.time, instance_data.state)
 
         # specifying the routes and methods of the api
         self.route("/", methods=['GET'],strict_slashes=False)(self._home_resource)

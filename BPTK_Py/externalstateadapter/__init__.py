@@ -1,4 +1,5 @@
-from .externalStateAdapter import ExternalStateAdapter, InstanceState, FileAdapter
+from .externalStateAdapter import ExternalStateAdapter, InstanceState
+from .file_adapter import FileAdapter
 
 # Optional imports - only import if dependencies are available
 try:
