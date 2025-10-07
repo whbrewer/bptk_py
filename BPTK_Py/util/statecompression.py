@@ -120,5 +120,148 @@ def decompress_results(results):
                     scenario_transformed = scenario_manager_transformed[scenario_name]
                 
                     scenario_transformed[constant_name] = {step_str: constant[i - 1]}
-                    
+
     return result
+
+def compress_scenario_cache(scenario_cache):
+    """
+    Compress scenario cache data by applying compression to each equation's time-series.
+    scenario_cache structure: {scenario_manager: {scenario: {equation: {time: value}}}}
+    """
+    if not scenario_cache or not isinstance(scenario_cache, dict):
+        return scenario_cache
+
+    compressed_cache = {}
+
+    for scenario_manager_name, scenarios in scenario_cache.items():
+        if not isinstance(scenarios, dict):
+            continue
+
+        compressed_cache[scenario_manager_name] = {}
+
+        for scenario_name, cache_data in scenarios.items():
+            if not isinstance(cache_data, dict):
+                compressed_cache[scenario_manager_name][scenario_name] = cache_data
+                continue
+
+            # Compress each equation's time-series data
+            compressed_cache[scenario_manager_name][scenario_name] = {}
+
+            for equation_name, time_series_data in cache_data.items():
+                if isinstance(time_series_data, dict) and time_series_data:
+                    # Check if this looks like time-series data (keys are time steps)
+                    first_key = list(time_series_data.keys())[0]
+                    if isinstance(first_key, (str, float, int)) and str(first_key).replace('.', '').isdigit():
+                        # This is time-series data, compress it to array format
+                        # Sort by time step to ensure consistent ordering
+                        sorted_times = sorted(time_series_data.keys(), key=lambda x: float(x))
+                        compressed_cache[scenario_manager_name][scenario_name][equation_name] = [
+                            time_series_data[time_key] for time_key in sorted_times
+                        ]
+                    else:
+                        # Not time-series data, keep as-is
+                        compressed_cache[scenario_manager_name][scenario_name][equation_name] = time_series_data
+                else:
+                    # Not a dict or empty, keep as-is
+                    compressed_cache[scenario_manager_name][scenario_name][equation_name] = time_series_data
+
+    return compressed_cache
+
+def decompress_scenario_cache(compressed_scenario_cache):
+    """
+    Decompress scenario cache data by expanding each equation's array back to time-series.
+    """
+    if not compressed_scenario_cache or not isinstance(compressed_scenario_cache, dict):
+        return compressed_scenario_cache
+
+    decompressed_cache = {}
+
+    for scenario_manager_name, scenarios in compressed_scenario_cache.items():
+        if not isinstance(scenarios, dict):
+            continue
+
+        decompressed_cache[scenario_manager_name] = {}
+
+        for scenario_name, cache_data in scenarios.items():
+            if not isinstance(cache_data, dict):
+                decompressed_cache[scenario_manager_name][scenario_name] = cache_data
+                continue
+
+            # Decompress each equation's array back to time-series
+            decompressed_cache[scenario_manager_name][scenario_name] = {}
+
+            for equation_name, equation_data in cache_data.items():
+                if isinstance(equation_data, list) and equation_data:
+                    # This is compressed time-series data, expand it back
+                    time_series = {}
+                    for i, value in enumerate(equation_data):
+                        time_key = f"{i + 1}.0"  # Convert back to time step format
+                        time_series[time_key] = value
+                    decompressed_cache[scenario_manager_name][scenario_name][equation_name] = time_series
+                else:
+                    # Not compressed array data, keep as-is
+                    decompressed_cache[scenario_manager_name][scenario_name][equation_name] = equation_data
+
+    return decompressed_cache
+
+def _compress_time_series_data(data):
+    """
+    Helper function to compress time-series data similar to compress_settings logic.
+    """
+    if not data:
+        return data
+
+    # Transform step-indexed data into compressed format
+    compressed = {}
+
+    for step in data.keys():
+        step_data = data[step]
+        if not isinstance(step_data, dict):
+            continue
+
+        for key, value in step_data.items():
+            if key not in compressed:
+                compressed[key] = [value]
+            else:
+                compressed[key].append(value)
+
+    return compressed
+
+def _decompress_time_series_data(compressed_data):
+    """
+    Helper function to decompress time-series data similar to decompress_settings logic.
+    """
+    if not compressed_data:
+        return compressed_data
+
+    # Transform compressed format back to step-indexed data
+    result = {}
+
+    # Find the maximum length to determine number of steps
+    max_length = max(len(values) if isinstance(values, list) else 1
+                    for values in compressed_data.values()) if compressed_data else 0
+
+    for i in range(max_length):
+        step_str = f"{i + 1:.1f}"
+        result[step_str] = {}
+
+        for key, values in compressed_data.items():
+            if isinstance(values, list) and i < len(values):
+                result[step_str][key] = values[i]
+            else:
+                result[step_str][key] = values
+
+    return result
+
+def _is_compressed_time_series_data(data):
+    """
+    Helper function to detect if data looks like compressed time-series data.
+    """
+    if not isinstance(data, dict):
+        return False
+
+    # Check if values are lists (indicating compressed time-series)
+    for value in data.values():
+        if isinstance(value, list):
+            return True
+    return False

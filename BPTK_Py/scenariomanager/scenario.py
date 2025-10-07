@@ -11,6 +11,7 @@
 
 ### IMPORTS
 from ..logger import log
+from copy import deepcopy
 ###
 
 ###############################
@@ -110,6 +111,12 @@ class SimulationScenario():
         for key in self.model.memo.keys():
             self.model.memo[key] = {}
         self.sd_simulation = None
+
+    def _set_cache(self,cache):
+        self.model.memo = cache
+
+    def _get_cache(self):
+        return self.model.memo
 
     def setup_constants(self):
         """

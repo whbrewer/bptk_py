@@ -13,7 +13,7 @@ class InstanceState:
     instance_id: str
     time: str
     timeout: Any
-    step: int
+    step: Any
 
 class ExternalStateAdapter(metaclass=ABCMeta):
     @abstractmethod
@@ -26,6 +26,7 @@ class ExternalStateAdapter(metaclass=ABCMeta):
                 if(cur_state is not None and cur_state.state is not None):
                     cur_state.state["settings_log"] = statecompression.compress_settings(cur_state.state["settings_log"])
                     cur_state.state["results_log"] = statecompression.compress_results(cur_state.state["results_log"])
+        
         return self._save_state(state)
 
     def save_instance(self, state: InstanceState):
@@ -41,6 +42,9 @@ class ExternalStateAdapter(metaclass=ABCMeta):
                 if(cur_state is not None and cur_state.state is not None):
                     cur_state.state["settings_log"] = statecompression.decompress_settings(cur_state.state["settings_log"])
                     cur_state.state["results_log"] = statecompression.decompress_results(cur_state.state["results_log"])
+                    # Apply decompression to scenario_cache if present
+                    if "scenario_cache" in cur_state.state:
+                        cur_state.state["scenario_cache"] = statecompression.decompress_scenario_cache(cur_state.state["scenario_cache"])
         return state
 
     def load_instance(self, instance_uuid: str) -> InstanceState:
@@ -48,6 +52,7 @@ class ExternalStateAdapter(metaclass=ABCMeta):
         if(self.compress and state is not None and state.state is not None):
             state.state["settings_log"] = statecompression.decompress_settings(state.state["settings_log"])
             state.state["results_log"] = statecompression.decompress_results(state.state["results_log"])
+            
         return state
 
 

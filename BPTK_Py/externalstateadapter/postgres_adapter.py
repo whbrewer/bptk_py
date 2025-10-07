@@ -58,7 +58,7 @@ class PostgresAdapter(ExternalStateAdapter):
                 cur.execute("SELECT * FROM state WHERE instance_id = %s", (instance_state.instance_id,))
 
                 postgres_data = {
-                    "state": jsonpickle.dumps(instance_state.state),
+                    "state": jsonpickle.dumps(instance_state.state) if instance_state.state is not None else None,
                     "instance_id": instance_state.instance_id,
                     "time": str(instance_state.time),
                     "timeout.weeks": instance_state.timeout["weeks"],
@@ -90,7 +90,7 @@ class PostgresAdapter(ExternalStateAdapter):
             return None
 
         return InstanceState(
-            state=jsonpickle.loads(state_tuple[0]),
+            state=jsonpickle.loads(state_tuple[0]) if state_tuple[0] is not None else None,
             instance_id=state_tuple[1],
             time=datetime.datetime.strptime(state_tuple[2], "%Y-%m-%d %H:%M:%S.%f"),
             timeout = {
@@ -112,7 +112,7 @@ class PostgresAdapter(ExternalStateAdapter):
                     cur.execute("SELECT * FROM state WHERE instance_id = %s", (state.instance_id,))
 
                     postgres_data = {
-                        "state": jsonpickle.dumps(state.state),
+                        "state": jsonpickle.dumps(state.state) if state.state is not None else None,
                         "instance_id": state.instance_id,
                         "time": str(state.time),
                         "timeout.weeks": state.timeout["weeks"],

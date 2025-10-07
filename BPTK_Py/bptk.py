@@ -27,6 +27,7 @@ from .scenariorunners import HybridRunner
 from .scenariorunners import SdRunner
 from .util.didyoumean import didyoumean
 from .visualizations import visualizer
+from copy import deepcopy
 
 
 #plt.interactive(True)
@@ -236,7 +237,7 @@ class bptk():
                                            agent_properties, agent_property_types, series_names, return_df)
 
     def _set_state(self, state):
-        if(not "lock" in state.keys()):
+        if(state is not None and not "lock" in state.keys()):
             state["lock"] = False
         self.session_state = state
 
@@ -438,8 +439,10 @@ class bptk():
         starttime_ = starttime
         stoptime_ = None
 
+        scenario_cache = {}
         for _, manager in self.scenario_manager_factory.scenario_managers.items():
             if manager.name in scenario_managers:
+                scenario_cache[manager.name]={}
                 for scenario,scenario_object in manager.scenarios.items():
                     if scenario in scenarios:
                         if manager.name in settings:
@@ -448,7 +451,8 @@ class bptk():
                         starttime_ = max(starttime_, scenario_object.starttime)
                         stoptime_ = min(stoptime_,scenario_object.stoptime) if stoptime_ is not None else scenario_object.stoptime
                         self.reset_scenario_cache(scenario_manager=manager.name, scenario=scenario)
-
+                        scenario_cache[manager.name][scenario]=self._get_scenario_cache(manager.name,scenario)
+    
         self.session_state = {
             "scenarios": scenarios,
             "scenario_managers": scenario_managers,
@@ -465,6 +469,7 @@ class bptk():
             "dt": dt,
             "settings_log":{},
             "results_log":{},
+            "scenario_cache":scenario_cache,
             "lock": False
         }
 
@@ -508,12 +513,20 @@ class bptk():
         step = self.session_state["step"]
         stoptime = self.session_state["stoptime"]
         dt=self.session_state["dt"]
+        scenario_cache = self.session_state["scenario_cache"]
 
         if step>stoptime:
             return {"msg":"Stoptime reached"}
 
         simulation_results = {manager:{} for manager in scenario_managers}
         flat_results = {manager:{} for manager in scenario_managers}
+
+        # set the scenario caches
+        for _, manager in self.scenario_manager_factory.scenario_managers.items():
+            if manager.name in scenario_managers:
+                for scenario  in manager.scenarios.keys():
+                    if scenario in scenarios:
+                        self._set_scenario_cache(scenario_manager=manager.name, scenario=scenario, cache=scenario_cache[manager.name][scenario])
 
         for _ , manager in self.scenario_manager_factory.scenario_managers.items():
 
@@ -555,6 +568,15 @@ class bptk():
                             value_content = simulation_results[manager.name][scenario][value]
                             flat_results[manager.name][scenario][value] = value_content[list(value_content.keys())[0]]
 
+        # save scenario caches
+
+        for _, manager in self.scenario_manager_factory.scenario_managers.items():
+            if manager.name in scenario_managers:
+                for scenario  in manager.scenarios.keys():
+                    if scenario in scenarios:
+                        self.session_state["scenario_cache"][manager.name][scenario] = self._get_scenario_cache(scenario_manager=manager.name, scenario=scenario)
+
+            
         # log settings and results
         self.session_state["settings_log"][step] = settings
         self.session_state["results_log"][step] = simulation_results
@@ -1001,6 +1023,14 @@ class bptk():
 
         scenario = self.scenario_manager_factory.get_scenario(scenario_manager=scenario_manager, scenario=scenario)
         scenario.reset_cache()
+
+    def _set_scenario_cache(self, scenario_manager="", scenario="", cache=None):
+        scenario = self.scenario_manager_factory.get_scenario(scenario_manager=scenario_manager, scenario=scenario)
+        scenario._set_cache(cache)
+
+    def _get_scenario_cache(self, scenario_manager="", scenario="", cache=None):
+        scenario = self.scenario_manager_factory.get_scenario(scenario_manager=scenario_manager, scenario=scenario)
+        return scenario._get_cache()
 
     def reset_scenario(self, scenario_manager, scenario):
         """Reset a scenario

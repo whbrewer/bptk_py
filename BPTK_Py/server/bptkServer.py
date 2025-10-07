@@ -150,7 +150,8 @@ class InstanceManager:
 
     def reconstruct_instance(self,instance_uuid,timeout,time,session_state):
         instance = self._make_bptk()
-        instance._set_state(session_state)
+        if session_state:
+           instance._set_state(session_state)
 
         instance_data = {
             "instance": instance,
@@ -206,7 +207,7 @@ class BptkServer(Flask):
         self._external_state_adapter = external_state_adapter
         self._instance_manager = InstanceManager(bptk_factory)
         self._bearer_token = bearer_token
-        self._externalize_state_completely = externalize_state_completely and external_state_adapter is not None
+        self._externalize_state_completely = externalize_state_completely
 
         # specifying the routes and methods of the api
         self.route("/", methods=['GET'],strict_slashes=False)(self._home_resource)
@@ -256,15 +257,17 @@ class BptkServer(Flask):
         def decorated(self, instance_uuid, *args, **kwargs):
             try:
                 result = f(self, instance_uuid, *args, **kwargs)
-                if self._externalize_state_completely:
+                if self._external_state_adapter:
                     # Save instance state to external storage before deleting
                     instance_state = self._instance_manager._get_instance_state(instance_uuid)
-                    if instance_state and self._external_state_adapter:
+                    if instance_state:
                         self._external_state_adapter.save_instance(instance_state)
-                    self._instance_manager._delete_instance(instance_uuid)
+
+                    if self._externalize_state_completely:    
+                        self._instance_manager._delete_instance(instance_uuid)
                 return result
             except Exception as e:
-                if self._externalize_state_completely:
+                if self._external_state_adapter:
                     # Save instance state to external storage before deleting, even on exception
                     try:
                         instance_state = self._instance_manager._get_instance_state(instance_uuid)
@@ -620,8 +623,10 @@ class BptkServer(Flask):
             # If externalizing state completely, save the new instance to external storage
             if self._externalize_state_completely and self._external_state_adapter:
                 instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                self._instance_manager._delete_instance(instance_uuid)
                 if instance_state:
                     self._external_state_adapter.save_instance(instance_state)
+
             response_data = {"instance_uuid":instance_uuid,"timeout":timeout}
             resp = make_response(json.dumps(response_data), 200)
         else:
@@ -654,6 +659,7 @@ class BptkServer(Flask):
             # If externalizing state completely, save each new instance to external storage
             if self._externalize_state_completely and self._external_state_adapter:
                 instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                self._instance_manager._delete_instance(instance_uuid)
                 if instance_state:
                     self._external_state_adapter.save_instance(instance_state)
 
@@ -790,7 +796,6 @@ class BptkServer(Flask):
         """
         Returns the accumulated results of a session, from the first step to the last step that was run.
         """
-        
         if not self._ensure_instance_exists(instance_uuid):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
             resp.headers['Content-Type'] = 'application/json'
@@ -846,9 +851,6 @@ class BptkServer(Flask):
             resp = make_response(jsonpickle.dumps(result), 200)
         else:
             resp = make_response('{"error": "no data was returned from run_step"}', 500)
-
-        if self._external_state_adapter != None:
-            self._external_state_adapter.save_instance(self._instance_manager._get_instance_state(instance_uuid))
 
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin']='*'
@@ -908,9 +910,6 @@ class BptkServer(Flask):
             resp = make_response(jsonpickle.dumps(result), 200)
         else:
             resp = make_response('{"error": "no data was returned from run_step"}', 500)
-
-        if self._external_state_adapter != None:
-            self._external_state_adapter.save_instance(self._instance_manager._get_instance_state(instance_uuid))
 
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin']='*'
@@ -974,9 +973,7 @@ class BptkServer(Flask):
                 yield "]"
             except:
                 instance.unlock()
-            if self._external_state_adapter != None:
-                self._external_state_adapter.save_instance(self._instance_manager._get_instance_state(instance_uuid))
-
+            
         resp = Response(streamer())
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -992,7 +989,7 @@ class BptkServer(Flask):
         Arguments: None
         """
 
-        if not self._instance_manager.is_valid_instance(instance_uuid):
+        if not self._ensure_instance_exists(instance_uuid):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
         else:
             self._instance_manager.keep_instance_alive(instance_uuid)

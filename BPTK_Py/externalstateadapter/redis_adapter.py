@@ -1,8 +1,55 @@
 import datetime
 import jsonpickle
+import jsonpickle.handlers
 import redis
+import numpy as np
 from .externalStateAdapter import ExternalStateAdapter, InstanceState
 
+# Try to configure ujson backend, but fall back gracefully if not available
+try:
+    import ujson
+    jsonpickle.load_backend('ujson', 'ujson', ValueError)
+    jsonpickle.set_preferred_backend('ujson')
+    jsonpickle.set_encoder_options('ujson', ensure_ascii=False, sort_keys=True)
+    jsonpickle.set_decoder_options('ujson', precise_float=True)
+    print("jsonpickle configured to use ujson backend")
+except (ImportError, AssertionError) as e:
+    # Fall back to default JSON backend if ujson is not available
+    print(f"ujson not available ({e}), using default JSON backend")
+    pass
+
+# Configure safer numpy serialization - convert to native Python types
+# Use proper BaseHandler classes as per jsonpickle documentation
+
+class NumpyFloatHandler(jsonpickle.handlers.BaseHandler):
+    def flatten(self, obj, data):
+        return float(obj)
+
+class NumpyIntHandler(jsonpickle.handlers.BaseHandler):
+    def flatten(self, obj, data):
+        return int(obj)
+
+class NumpyBoolHandler(jsonpickle.handlers.BaseHandler):
+    def flatten(self, obj, data):
+        return bool(obj)
+
+class NumpyArrayHandler(jsonpickle.handlers.BaseHandler):
+    def flatten(self, obj, data):
+        return obj.tolist()
+
+# Register handlers using proper jsonpickle handler classes
+jsonpickle.handlers.register(np.float64, NumpyFloatHandler, base=True)
+jsonpickle.handlers.register(np.float32, NumpyFloatHandler, base=True)
+jsonpickle.handlers.register(np.int64, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.int32, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.int16, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.int8, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.uint64, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.uint32, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.uint16, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.uint8, NumpyIntHandler, base=True)
+jsonpickle.handlers.register(np.bool_, NumpyBoolHandler, base=True)
+jsonpickle.handlers.register(np.ndarray, NumpyArrayHandler, base=True)
 
 class RedisAdapter(ExternalStateAdapter):
     """
@@ -37,9 +84,9 @@ class RedisAdapter(ExternalStateAdapter):
             return None
 
         try:
-            instance_data = jsonpickle.loads(data)
+            instance_data = jsonpickle.decode(data)
             return InstanceState(
-                state=jsonpickle.loads(instance_data["state"]),
+                state=jsonpickle.decode(instance_data["state"]) if instance_data["state"] is not None else None,
                 instance_id=instance_data["instance_id"],
                 time=datetime.datetime.fromisoformat(instance_data["time"]),
                 timeout=instance_data["timeout"],
@@ -75,9 +122,9 @@ class RedisAdapter(ExternalStateAdapter):
             return
 
         try:
-            # Prepare data for storage
+            # Prepare data for storage with make_refs=False to prevent py/id issues
             redis_data = {
-                "state": jsonpickle.dumps(instance_state.state),
+                "state": jsonpickle.encode(instance_state.state, make_refs=False) if instance_state.state is not None else None,
                 "instance_id": instance_state.instance_id,
                 "time": instance_state.time.isoformat(),
                 "timeout": instance_state.timeout,
@@ -86,8 +133,8 @@ class RedisAdapter(ExternalStateAdapter):
 
             key = self._get_instance_key(instance_state.instance_id)
 
-            # Store data
-            self._redis_client.set(key, jsonpickle.dumps(redis_data))
+            # Store data with make_refs=False to prevent object reference issues
+            self._redis_client.set(key, jsonpickle.encode(redis_data, make_refs=False))
 
             # Set TTL based on timeout if specified
             if instance_state.timeout:

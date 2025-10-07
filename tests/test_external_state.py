@@ -84,6 +84,7 @@ def bptk_factory():
 
 @pytest.fixture
 def app():
+    import os
     if not os.path.exists("state/"):
         os.mkdir("state/")
     adapter = FileAdapter(True, os.path.join(os.getcwd(), "state"))
@@ -137,7 +138,7 @@ def test_instance_timeouts(app, client):
         ]
     }
 
-    response = client.post(f'http://localhost:500/{instance_id}/begin-session', data=json.dumps(content), content_type='application/json')
+    response = client.post(f'http://localhost:5000/{instance_id}/begin-session', data=json.dumps(content), content_type='application/json')
     assert response.status_code == 200, "begin-session should return 200"
 
     run_content = {
