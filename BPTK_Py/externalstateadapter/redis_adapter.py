@@ -78,22 +78,34 @@ class RedisAdapter(ExternalStateAdapter):
     def _load_instance(self, instance_uuid: str) -> InstanceState:
         """Load a single instance from Redis."""
         key = self._get_instance_key(instance_uuid)
+        print(f"[RedisAdapter] _load_instance called for {instance_uuid}, key: {key}")
         data = self._redis_client.get(key)
 
         if data is None:
+            print(f"[RedisAdapter] No data found for key: {key}")
             return None
 
         try:
             instance_data = jsonpickle.decode(data)
-            return InstanceState(
-                state=jsonpickle.decode(instance_data["state"]) if instance_data["state"] is not None else None,
+            print(f"[RedisAdapter] Successfully decoded instance data for {instance_uuid}")
+
+            state = jsonpickle.decode(instance_data["state"]) if instance_data["state"] is not None else None
+            if state and "stoptime" in state:
+                print(f"[RedisAdapter] Loaded state stoptime: {state['stoptime']}")
+            else:
+                print(f"[RedisAdapter] Warning: No stoptime found in loaded state")
+
+            result = InstanceState(
+                state=state,
                 instance_id=instance_data["instance_id"],
                 time=datetime.datetime.fromisoformat(instance_data["time"]),
                 timeout=instance_data["timeout"],
                 step=instance_data["step"]
             )
+            print(f"[RedisAdapter] Successfully created InstanceState for {instance_uuid}")
+            return result
         except (KeyError, ValueError, TypeError) as e:
-            print(f"Error loading instance {instance_uuid}: {e}")
+            print(f"[RedisAdapter] Error loading instance {instance_uuid}: {e}")
             return None
 
     def _load_state(self) -> list[InstanceState]:
@@ -111,6 +123,22 @@ class RedisAdapter(ExternalStateAdapter):
 
         return instances
 
+    def load_instance(self, instance_uuid: str) -> InstanceState:
+        """
+        Override the base class method to handle compression/decompression internally.
+        This prevents double decompression issues similar to FileAdapter.
+        """
+        print(f"[RedisAdapter] load_instance (public) called for {instance_uuid}")
+        return self._load_instance(instance_uuid)
+
+    def save_instance(self, state: InstanceState):
+        """
+        Override the base class method to handle compression internally.
+        This prevents double compression issues similar to FileAdapter.
+        """
+        print(f"[RedisAdapter] save_instance (public) called for {state.instance_id if state else 'None'}")
+        return self._save_instance(state)
+
     def delete_instance(self, instance_uuid: str):
         """Delete an instance from Redis."""
         key = self._get_instance_key(instance_uuid)
@@ -118,8 +146,15 @@ class RedisAdapter(ExternalStateAdapter):
 
     def _save_instance(self, instance_state: InstanceState):
         """Save a single instance to Redis."""
+        print(f"[RedisAdapter] _save_instance called for instance {instance_state.instance_id if instance_state else 'None'}")
         if instance_state is None or instance_state.instance_id is None:
             return
+
+        # Check if state has stoptime
+        if instance_state.state and "stoptime" in instance_state.state:
+            print(f"[RedisAdapter] Saving state with stoptime: {instance_state.state['stoptime']}")
+        else:
+            print(f"[RedisAdapter] Warning: No stoptime found in state being saved")
 
         try:
             # Prepare data for storage with make_refs=False to prevent py/id issues

@@ -50,3 +50,8 @@ test = [
 Homepage = "https://bptk.transentis.com"
 Documentation = "https://bptk.transentis.com"
 Repository = "https://github.com/transentis/bptk_py"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:traitlets.*"
+]
