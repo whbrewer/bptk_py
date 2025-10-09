@@ -2,11 +2,22 @@ import unittest
 import os
 import sys, io
 import datetime
+import pytest
 
 from BPTK_Py.externalstateadapter.externalStateAdapter import ExternalStateAdapter, InstanceState
 from BPTK_Py.externalstateadapter.file_adapter import FileAdapter
 
-class TestExternalStateAdapter(unittest.TestCase):
+@pytest.fixture(params=[True, False], ids=["compress_true", "compress_false"])
+def compress(request):
+    """Fixture that provides both compress parameter values."""
+    return request.param
+
+@pytest.fixture(params=[True, False], ids=["externalize_completely", "no_externalize"])
+def externalize_state_completely(request):
+    """Fixture that provides both externalize_state_completely parameter values."""
+    return request.param
+
+class TestExternalStateAdapter:
     def setUp(self):
         pass
 
@@ -32,18 +43,18 @@ class TestExternalStateAdapter(unittest.TestCase):
 
         externalStateAdapter = TestableExternalStateAdapter(compress=True)
 
-        self.assertIsNone(externalStateAdapter._save_state(state="test"))   
-        self.assertIsNone(externalStateAdapter._save_instance(state="test"))    
-        self.assertIsNone(externalStateAdapter._load_state())   
-        self.assertIsNone(externalStateAdapter._load_instance(instance_uuid="123"))
-        self.assertIsNone(externalStateAdapter.delete_instance(instance_uuid="123"))  
+        assert externalStateAdapter._save_state(state="test") is None
+        assert externalStateAdapter._save_instance(state="test") is None
+        assert externalStateAdapter._load_state() is None
+        assert externalStateAdapter._load_instance(instance_uuid="123") is None
+        assert externalStateAdapter.delete_instance(instance_uuid="123") is None  
 
-class TestFileAdapter(unittest.TestCase):
+class TestFileAdapter:
     def setUp(self):
         pass
 
-    def testFileAdapter_load_instance_execption(self):
-        fileAdapter = FileAdapter(compress=True, path="invalid_path")
+    def testFileAdapter_load_instance_execption(self, compress):
+        fileAdapter = FileAdapter(compress=compress, path="invalid_path")
 
         #Redirect the console output
         old_stdout = sys.stdout
@@ -56,11 +67,11 @@ class TestFileAdapter(unittest.TestCase):
         sys.stdout = old_stdout
         output = new_stdout.getvalue()
 
-        self.assertIsNone(return_value)
-        self.assertIn("Error: [Errno 2] No such file or directory: 'invalid_path/123.json'",output)
+        assert return_value is None
+        assert "Error: [Errno 2] No such file or directory: 'invalid_path/123.json'" in output
 
-    def testFileAdapter_delete_instance_execption(self):
-        fileAdapter = FileAdapter(compress=True, path="invalid_path")
+    def testFileAdapter_delete_instance_execption(self, compress):
+        fileAdapter = FileAdapter(compress=compress, path="invalid_path")
 
         #Redirect the console output
         old_stdout = sys.stdout
@@ -73,17 +84,21 @@ class TestFileAdapter(unittest.TestCase):
         sys.stdout = old_stdout
         output = new_stdout.getvalue()
 
-        self.assertIn("Error: [Errno 2] No such file or directory: 'invalid_path/123.json'",output)
+        assert "Error: [Errno 2] No such file or directory: 'invalid_path/123.json'" in output
 
-class TestExternalStateConsistency(unittest.TestCase):
+@pytest.fixture
+def temp_dir():
+    """Fixture to provide a temporary directory that gets cleaned up after test."""
+    import tempfile
+    import shutil
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+class TestExternalStateConsistency:
     """Test that externalize_state_completely produces consistent results"""
 
-    def setUp(self):
-        import tempfile
-        self.temp_dir = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__('shutil').rmtree(self.temp_dir, ignore_errors=True))
-
-    def test_externalize_state_completely_consistency(self):
+    def test_externalize_state_completely_consistency(self, externalize_state_completely, temp_dir):
         """Test that externalize_state_completely=True produces same results as False"""
         try:
             from BPTK_Py import bptk
@@ -120,7 +135,7 @@ class TestExternalStateConsistency(unittest.TestCase):
             print(f"Using equations for testing: {test_equations}")
 
             # Create file adapter for external state
-            file_adapter = FileAdapter(compress=True, path=self.temp_dir)
+            file_adapter = FileAdapter(compress=externalize_state_completely, path=temp_dir)
 
             # Test results without external state
             bptk_instance.begin_session(
@@ -201,50 +216,46 @@ class TestExternalStateConsistency(unittest.TestCase):
             bptk_external.end_session()
 
             # Compare results
-            self.assertEqual(len(results_internal), len(results_external),
-                           "Should have same number of step results")
+            assert len(results_internal) == len(results_external), \
+                "Should have same number of step results"
 
             # Compare step-by-step results (allowing for small floating point differences)
             for i, (internal, external) in enumerate(zip(results_internal, results_external)):
-                with self.subTest(step=i+1):
-                    self.assertIsNotNone(internal, f"Internal result at step {i+1} should not be None")
-                    self.assertIsNotNone(external, f"External result at step {i+1} should not be None")
+                # Remove subTest and use direct assertions
+                assert internal is not None, f"Internal result at step {i+1} should not be None"
+                assert external is not None, f"External result at step {i+1} should not be None"
 
-                    # Compare structure
-                    self.assertEqual(set(internal.keys()), set(external.keys()),
-                                   f"Step {i+1}: Manager keys should match")
+                # Compare structure
+                assert set(internal.keys()) == set(external.keys()), \
+                    f"Step {i+1}: Manager keys should match"
 
-                    for manager_key in internal.keys():
-                        self.assertEqual(set(internal[manager_key].keys()),
-                                       set(external[manager_key].keys()),
-                                       f"Step {i+1}: Scenario keys should match for manager {manager_key}")
+                for manager_key in internal.keys():
+                    assert set(internal[manager_key].keys()) == set(external[manager_key].keys()), \
+                        f"Step {i+1}: Scenario keys should match for manager {manager_key}"
 
-                        for scenario_key in internal[manager_key].keys():
-                            internal_equations = internal[manager_key][scenario_key]
-                            external_equations = external[manager_key][scenario_key]
+                    for scenario_key in internal[manager_key].keys():
+                        internal_equations = internal[manager_key][scenario_key]
+                        external_equations = external[manager_key][scenario_key]
 
-                            self.assertEqual(set(internal_equations.keys()),
-                                           set(external_equations.keys()),
-                                           f"Step {i+1}: Equation keys should match for {scenario_manager_name}.{scenario_name}")
+                        assert set(internal_equations.keys()) == set(external_equations.keys()), \
+                            f"Step {i+1}: Equation keys should match for {scenario_manager_name}.{scenario_name}"
 
-                            # Compare equation values (allowing small float differences)
-                            for eq_key in internal_equations.keys():
-                                internal_val = internal_equations[eq_key]
-                                external_val = external_equations[eq_key]
+                        # Compare equation values (allowing small float differences)
+                        for eq_key in internal_equations.keys():
+                            internal_val = internal_equations[eq_key]
+                            external_val = external_equations[eq_key]
 
-                                # Handle nested time-step structure
-                                if isinstance(internal_val, dict) and isinstance(external_val, dict):
-                                    for time_key in internal_val.keys():
-                                        if time_key in external_val:
-                                            internal_time_val = internal_val[time_key]
-                                            external_time_val = external_val[time_key]
+                            # Handle nested time-step structure
+                            if isinstance(internal_val, dict) and isinstance(external_val, dict):
+                                for time_key in internal_val.keys():
+                                    if time_key in external_val:
+                                        internal_time_val = internal_val[time_key]
+                                        external_time_val = external_val[time_key]
 
-                                            if isinstance(internal_time_val, (int, float)) and \
-                                               isinstance(external_time_val, (int, float)):
-                                                self.assertAlmostEqual(
-                                                    internal_time_val, external_time_val, places=10,
-                                                    msg=f"Step {i+1}: Values should match for {eq_key} at time {time_key}"
-                                                )
+                                        if isinstance(internal_time_val, (int, float)) and \
+                                           isinstance(external_time_val, (int, float)):
+                                            assert abs(internal_time_val - external_time_val) < 1e-10, \
+                                                f"Step {i+1}: Values should match for {eq_key} at time {time_key}"
 
             # Test that session results are also consistent
             if internal_session_results and external_session_results:
@@ -252,8 +263,8 @@ class TestExternalStateConsistency(unittest.TestCase):
                 external_results = external_session_results
 
                 # Basic structural comparison
-                self.assertEqual(set(internal_results.keys()), set(external_results.keys()),
-                               "Session results should have same time steps")
+                assert set(internal_results.keys()) == set(external_results.keys()), \
+                    "Session results should have same time steps"
 
                 print(f"✓ External state consistency test passed for {len(results_internal)} steps")
 

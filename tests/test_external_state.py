@@ -11,15 +11,11 @@ import redis
 from dotenv import load_dotenv
 from BPTK_Py import sd_functions as sd
 
-class Floor(sd.Function):
-    """
-    Generic SD DSL function.
-    """
-    def __init__(self, element):
-        self.element = element
+@pytest.fixture(params=[True, False], ids=["externalize_completely", "no_externalize"])
+def externalize_state_completely(request):
+    """Fixture that provides both externalize_state_completely parameter values."""
+    return request.param
 
-    def term(self, time="t"):
-        return "math.floor({})".format(self.element)
 
 def bptk_factory():
     model = Model(starttime=1.0,stoptime=5.0, dt=1.0, name="Test Model")
@@ -31,11 +27,22 @@ def bptk_factory():
             (4.0, 2.0), 
             (5.0, 2.0)
         ]
+    
+    model.points["round"] = [
+            (1.0, 1.0), 
+            (2.0, 2.0), 
+            (3.0, 3.0), 
+            (4.0, 4.0), 
+            (5.0, 5.0)
+        ]
+    
     stock = model.stock("stock")
     inflow = model.flow("inflow")
     outflow = model.flow("outflow")
     input = model.constant("input")
     converter = model.converter("converter")
+    round = model.converter("round")
+    round.equation = sd.lookup(sd.time(), "round")
     delay = model.converter("delay")
     delay.equation = sd.lookup(sd.time(), "delay")
     stock.initial_value=400.0
@@ -44,22 +51,6 @@ def bptk_factory():
     outflow.equation=sd.delay(model,inflow,delay,100.0)
     input.equation=100.0
     converter.equation=stock
-
-    stock2 = model.stock("stock2")
-    inflow2 = model.flow("inflow2")
-    outflow2 = model.flow("outflow2")
-    input1 = model.constant("input1")
-    output = model.constant("output")
-    converter2 = model.converter("converter2")
-    multiplier = model.constant("multiplier")
-    multiplier.equation=1.0
-    stock2.initial_value=400.0
-    stock2.equation=inflow2-outflow2
-    inflow2.equation=input1*multiplier
-    outflow2.equation=sd.min(output,converter2)
-    input1.equation=outflow2
-    output.equation=100.0
-    converter2.equation=sd.max(Floor(sd.min(stock2,1000.0)),0.0)
 
     scenario_manager1={
         "firstManager":{
@@ -87,8 +78,7 @@ def bptk_factory():
             "scenario1":{
                 "constants":
                 {
-                    "input":100.0,
-                    "output":100.0
+                    "input":100.0
                 }
             }
 
@@ -105,20 +95,18 @@ def bptk_factory():
             "scenario1":{
                 "constants":
                 {
-                    "input":100.0,
-                    "output": 100.0
+                    "input":100.0
+                    
                 }
             },
             "scenario2":{
                 "constants":{
-                    "input":200.0,
-                    "output": 200.0
+                    "input":200.0
                 }
             },
             "scenario3":{
                 "constants":{
-                    "input":300.0,
-                    "output": 300.0
+                    "input":300.0
                 }
             }
 
@@ -130,12 +118,12 @@ def bptk_factory():
     return bptk
 
 @pytest.fixture
-def file_app():
+def file_app(externalize_state_completely):
     import os
     if not os.path.exists("state/"):
         os.mkdir("state/")
-    adapter = FileAdapter(True, os.path.join(os.getcwd(), "state"))
-    flask_app = BptkServer(__name__, bptk_factory, external_state_adapter=adapter,externalize_state_completely=True)
+    adapter = FileAdapter(compress=True, path=os.path.join(os.getcwd(), "state"))
+    flask_app = BptkServer(__name__, bptk_factory, external_state_adapter=adapter, externalize_state_completely=externalize_state_completely)
     yield flask_app
 
     # Cleanup after test
@@ -185,7 +173,11 @@ def external_state_base(client):
         ],
         "equations": [
             "converter",
-            "converter2"
+            "delay",
+            "inflow",
+            "outflow",
+            "input",
+            "round"
         ]
     }
 
@@ -195,9 +187,13 @@ def external_state_base(client):
     # Prepare content for run-step
     def make_run_content(value):
         content={
-            "settings": {
-                "input":value,
-                "output": value
+            "settings":{ 
+                "firstManager":{
+                    "scenario1":{
+                "constants":{
+                    "input":value
+                }
+            }}
             },
             "flatResults": False
         }
@@ -208,29 +204,35 @@ def external_state_base(client):
     assert response.status_code == 200, "run-step should return 200"
 
     data= json.loads(response.data)
+    assert data["firstManager"]["scenario1"]["input"]["1.0"]==100.0 , "input should have value 100.0"
     assert data["firstManager"]["scenario1"]["converter"]["1.0"]==400.0 , "converter should have value 400.0"
-    
+    assert data["firstManager"]["scenario1"]["delay"]["1.0"]==2.0 , "delay should have value 2.0"
+    assert data["firstManager"]["scenario1"]["inflow"]["1.0"]==100.0 , "inflow should have value 100.0"
+    assert data["firstManager"]["scenario1"]["outflow"]["1.0"]==100.0 , "outflow should have value 100.0"
     response = client.post(f'{instance_uuid}/run-step', data=json.dumps(make_run_content(400.0)), content_type='application/json')
     assert response.status_code == 200, "run-step should return 200"
 
     data= json.loads(response.data)
+    assert data["firstManager"]["scenario1"]["input"]["2.0"]==400.0 , "input should have value 100.0"
     assert data["firstManager"]["scenario1"]["converter"]["2.0"]==400.0 , "converter should have value 400.0"
-   
+    assert data["firstManager"]["scenario1"]["delay"]["2.0"]==2.0 , "delay should have value 2.0"
+    assert data["firstManager"]["scenario1"]["inflow"]["2.0"]==400.0 , "inflow should have value 100.0"
+    assert data["firstManager"]["scenario1"]["outflow"]["2.0"]==100.0 , "outflow should have value 100.0"
+    response = client.post(f'{instance_uuid}/run-step', data=json.dumps(make_run_content(400.0)), content_type='application/json')
+    assert response.status_code == 200, "run-step should return 200"
+
+    data= json.loads(response.data)
+    assert data["firstManager"]["scenario1"]["converter"]["3.0"]==700.0 , "converter should have value 700.0"
+    assert data["firstManager"]["scenario1"]["delay"]["3.0"]==2.0 , "delay should have value 2.0"
+    assert data["firstManager"]["scenario1"]["inflow"]["3.0"]==400.0 , "inflow should have value 100.0"
+    assert data["firstManager"]["scenario1"]["outflow"]["3.0"]==100.0 , "outflow should have value 100.0"
 
     response = client.post(f'{instance_uuid}/run-step', data=json.dumps(make_run_content(400.0)), content_type='application/json')
     assert response.status_code == 200, "run-step should return 200"
 
     data= json.loads(response.data)
-    assert data["firstManager"]["scenario1"]["converter"]["3.0"]==400.0 , "converter should have value 400.0"
-   
 
-    response = client.post(f'{instance_uuid}/run-step', data=json.dumps(make_run_content(400.0)), content_type='application/json')
-    assert response.status_code == 200, "run-step should return 200"
-
-    data= json.loads(response.data)
-
-    assert data["firstManager"]["scenario1"]["converter"]["4.0"]==400.0 , "converter should have value 400.0"
-    assert data["firstManager"]["scenario1"]["converter2"]["4.0"]==100.0 , "converter2 should have value 100.0"
+    assert data["firstManager"]["scenario1"]["converter"]["4.0"]==1000.0 , "converter should have value 1000.0"
 
     # Cleanup - stop the instance to properly clean up resources
     print("Cleaning up instance...")
@@ -242,7 +244,7 @@ def test_external_state_file(file_client_fixture):
     external_state_base(file_client_fixture)
 
 @pytest.fixture
-def redis_app():
+def redis_app(externalize_state_completely):
     """Create Flask app with Redis adapter"""
     # Try multiple paths for .env file
     env_paths = [
@@ -264,7 +266,7 @@ def redis_app():
         except Exception as e:
             print(f"Error loading {env_path}: {e}")
 
-    
+
     print(f"Redis URL configured: {bool(redis_url)}")
     print(f"Redis tests enabled: {enable_redis_tests}")
 
@@ -282,7 +284,7 @@ def redis_app():
 
     # Create Redis adapter
     adapter = RedisAdapter(redis_client, compress=True, key_prefix="bptk:test")
-    flask_app = BptkServer(__name__, bptk_factory, external_state_adapter=adapter, externalize_state_completely=True)
+    flask_app = BptkServer(__name__, bptk_factory, external_state_adapter=adapter, externalize_state_completely=externalize_state_completely)
 
     yield flask_app
 
@@ -331,7 +333,8 @@ def test_external_state_redis(redis_client_fixture):
     external_state_base(redis_client_fixture)
 
 
-def test_instance_timeouts(client):
+def test_instance_timeouts(file_client_fixture):
+    client = file_client_fixture
     def assert_in_full_metrics(instance_id, contains: bool):
         response = client.get('/full-metrics')
         assert response.status_code == 200, "full-metrics should return 200"

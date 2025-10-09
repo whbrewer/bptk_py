@@ -42,7 +42,14 @@ class FileAdapter(ExternalStateAdapter):
         The base class tries to decompress after we've already handled it.
         """
         print(f"[FileAdapter] load_instance called for {instance_uuid}")
-        return self._load_instance(instance_uuid)
+        state = self._load_instance(instance_uuid)
+
+        # Apply scenario_cache numeric key restoration (no compression, just JSON key conversion fix)
+        if(state is not None and state.state is not None):
+            if "scenario_cache" in state.state:
+                state.state["scenario_cache"] = self._restore_numeric_keys(state.state["scenario_cache"])
+
+        return state
 
     def save_instance(self, state: InstanceState):
         """
@@ -118,6 +125,10 @@ class FileAdapter(ExternalStateAdapter):
                 print(f"[FileAdapter] Loading instance {uuid}")
                 instance = self._load_instance(uuid)
                 if instance:
+                    # Apply scenario_cache numeric key restoration (no compression, just JSON key conversion fix)
+                    if(instance.state is not None):
+                        if "scenario_cache" in instance.state:
+                            instance.state["scenario_cache"] = self._restore_numeric_keys(instance.state["scenario_cache"])
                     instances.append(instance)
                     print(f"[FileAdapter] Successfully loaded instance {uuid}")
                 else:

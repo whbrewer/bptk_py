@@ -15,12 +15,17 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from test_config import TestConfig, requires_postgres, requires_redis
 
+@pytest.fixture(params=[True, False], ids=["externalize_completely", "no_externalize"])
+def externalize_state_completely(request):
+    """Fixture that provides both externalize_state_completely parameter values."""
+    return request.param
+
 
 class BaseExternalStateAdapterTest(ABC):
     """Base test class for external state adapters."""
 
     @abstractmethod
-    def create_adapter(self):
+    def create_adapter(self, externalize_state_completely):
         """Create an instance of the adapter being tested."""
         pass
 
@@ -71,9 +76,9 @@ class BaseExternalStateAdapterTest(ABC):
             step=5
         )
 
-    def test_save_and_load_instance(self):
+    def test_save_and_load_instance(self, externalize_state_completely):
         """Test saving and loading a single instance."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -99,9 +104,9 @@ class BaseExternalStateAdapterTest(ABC):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_load_nonexistent_instance(self):
+    def test_load_nonexistent_instance(self, externalize_state_completely):
         """Test loading an instance that doesn't exist."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -116,9 +121,9 @@ class BaseExternalStateAdapterTest(ABC):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_save_multiple_instances(self):
+    def test_save_multiple_instances(self, externalize_state_completely):
         """Test saving and loading multiple instances."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -145,9 +150,9 @@ class BaseExternalStateAdapterTest(ABC):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_update_existing_instance(self):
+    def test_update_existing_instance(self, externalize_state_completely):
         """Test updating an existing instance."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -187,9 +192,9 @@ class BaseExternalStateAdapterTest(ABC):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_delete_instance(self):
+    def test_delete_instance(self, externalize_state_completely):
         """Test deleting an instance."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -213,11 +218,11 @@ class BaseExternalStateAdapterTest(ABC):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_compression_enabled(self):
+    def test_compression_enabled(self, externalize_state_completely):
         """Test adapter with compression enabled."""
         # This test is more about ensuring compression doesn't break functionality
         # The actual compression testing should be in the compression module tests
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Adapter not available")
 
@@ -263,10 +268,10 @@ class BaseExternalStateAdapterTest(ABC):
 
 
 @requires_postgres
-class TestPostgresAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
+class TestPostgresAdapter(BaseExternalStateAdapterTest):
     """Tests for PostgresAdapter."""
 
-    def create_adapter(self):
+    def create_adapter(self, externalize_state_completely):
         """Create PostgresAdapter for testing."""
         try:
             import psycopg
@@ -301,7 +306,7 @@ class TestPostgresAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
                 """)
                 conn.commit()
 
-            return PostgresAdapter(conn, compress=True)
+            return PostgresAdapter(conn, compress=externalize_state_completely)
         except Exception as e:
             pytest.skip(f"Could not connect to PostgreSQL: {e}")
             return None
@@ -319,10 +324,10 @@ class TestPostgresAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
 
 
 @requires_redis
-class TestRedisAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
+class TestRedisAdapter(BaseExternalStateAdapterTest):
     """Tests for RedisAdapter."""
 
-    def create_adapter(self):
+    def create_adapter(self, externalize_state_completely):
         """Create RedisAdapter for testing."""
         try:
             import redis
@@ -341,7 +346,7 @@ class TestRedisAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
             # Test connection
             redis_client.ping()
 
-            return RedisAdapter(redis_client, compress=True, key_prefix="bptk:test")
+            return RedisAdapter(redis_client, compress=externalize_state_completely, key_prefix="bptk:test")
         except Exception as e:
             pytest.skip(f"Could not connect to Redis: {e}")
             return None
@@ -361,9 +366,9 @@ class TestRedisAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
             except Exception:
                 pass
 
-    def test_redis_ttl_functionality(self):
+    def test_redis_ttl_functionality(self, externalize_state_completely):
         """Test Redis-specific TTL functionality."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Redis adapter not available")
 
@@ -386,9 +391,9 @@ class TestRedisAdapter(BaseExternalStateAdapterTest, unittest.TestCase):
         finally:
             self.cleanup_adapter(adapter)
 
-    def test_redis_key_prefix(self):
+    def test_redis_key_prefix(self, externalize_state_completely):
         """Test Redis key prefix functionality."""
-        adapter = self.create_adapter()
+        adapter = self.create_adapter(externalize_state_completely)
         if adapter is None:
             pytest.skip("Redis adapter not available")
 
