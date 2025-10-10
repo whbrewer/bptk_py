@@ -72,6 +72,15 @@ configuration = {
     "log_modes": ["logfile"],
     "log_file": "bptk_py.log",
 
+    # Pydantic Logfire configuration (optional)
+    # Set to None to disable, or provide a dict with Logfire config
+    "logfire_config": None,
+    # Example:
+    # "logfire_config": {
+    #     "project_name": "bptk_simulations",
+    #     "environment": "development"
+    # },
+
     "set_scenario_monitor": True,
     "set_model_monitor": True,
 }

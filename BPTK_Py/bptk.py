@@ -148,6 +148,14 @@ class bptk():
         logmod.loglevel = self.config.loglevel
         logmod.logfile = self.config.configuration["log_file"]
 
+        # Configure Logfire if specified in configuration
+        if self.config.configuration.get("logfire_config") and isinstance(self.config.configuration["logfire_config"], dict):
+            try:
+                if logmod.configure_logfire(**self.config.configuration["logfire_config"]):
+                    log("[INFO] Pydantic Logfire configured successfully")
+            except Exception as e:
+                log(f"[WARN] Failed to configure Logfire: {e}")
+
         # Setup matplotlib
         if self.config.configuration["interactive"]:
             import matplotlib.pyplot as plt
