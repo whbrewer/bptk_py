@@ -115,7 +115,6 @@ class FileAdapter(ExternalStateAdapter):
                         if "scenario_cache" in instance.state:
                             instance.state["scenario_cache"] = self._restore_numeric_keys(instance.state["scenario_cache"])
                     instances.append(instance)
-                else:
 
         return instances
 
@@ -148,7 +147,7 @@ class FileAdapter(ExternalStateAdapter):
                     try:
                         decoded_data["settings_log"] = statecompression.decompress_settings(decoded_data["settings_log"])
                     except Exception as e:
-                        print(f"[FileAdapter] Error decompressing settings_log (keeping original): {e}")
+                        pass
                         # Keep original data if decompression fails
                 if "results_log" in decoded_data:
                     results_log = decoded_data["results_log"]
@@ -156,7 +155,7 @@ class FileAdapter(ExternalStateAdapter):
                         try:
                             decoded_data["results_log"] = statecompression.decompress_results(decoded_data["results_log"])
                         except Exception as e:
-                            # Keep original data if decompression fails
+                            pass
                     else:
                         print(f"[FileAdapter] Results_log doesn't appear to be compressed, skipping decompression")
 
