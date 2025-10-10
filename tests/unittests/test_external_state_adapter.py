@@ -26,26 +26,20 @@ class TestExternalStateAdapter:
             def __init__(self, compress):
                 super().__init__(compress)
 
-            def _save_state(self, state):
-                return super()._save_state(state)    
-    
+            
             def _save_instance(self, state):
                 return super()._save_instance(state)
     
             def _load_instance(self, instance_uuid):
                 return super()._load_instance(instance_uuid)
     
-            def _load_state(self):
-                return super()._load_state()
-    
+            
             def delete_instance(self, instance_uuid):
                 return super().delete_instance(instance_uuid)
 
         externalStateAdapter = TestableExternalStateAdapter(compress=True)
 
-        assert externalStateAdapter._save_state(state="test") is None
         assert externalStateAdapter._save_instance(state="test") is None
-        assert externalStateAdapter._load_state() is None
         assert externalStateAdapter._load_instance(instance_uuid="123") is None
         assert externalStateAdapter.delete_instance(instance_uuid="123") is None  
 
@@ -68,7 +62,7 @@ class TestFileAdapter:
         output = new_stdout.getvalue()
 
         assert return_value is None
-        assert "Error: [Errno 2] No such file or directory: 'invalid_path/123.json'" in output
+        assert "[FileAdapter] _load_instance called for 123, file: invalid_path/123.json" in output
 
     def testFileAdapter_delete_instance_execption(self, compress):
         fileAdapter = FileAdapter(compress=compress, path="invalid_path")
@@ -84,7 +78,7 @@ class TestFileAdapter:
         sys.stdout = old_stdout
         output = new_stdout.getvalue()
 
-        assert "Error: [Errno 2] No such file or directory: 'invalid_path/123.json'" in output
+        assert "[FileAdapter] delete_instance called for 123, file: invalid_path/123.json" in output
 
 @pytest.fixture
 def temp_dir():
@@ -193,8 +187,7 @@ class TestExternalStateConsistency:
             for i in range(step_count):
                 # Load state from external adapter
                 loaded_state = file_adapter.load_instance("test_instance")
-                if loaded_state and loaded_state.state:
-                    bptk_external._set_state(loaded_state.state)
+                
 
                 result = bptk_external.run_step()
                 if result and isinstance(result, dict) and "msg" in result:

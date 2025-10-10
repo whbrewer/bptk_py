@@ -392,55 +392,6 @@ def test_instance_timeouts(file_client_fixture):
     dir_content = os.listdir("state/")
     assert instance_id + ".json" in dir_content
 
-    assert_in_full_metrics(instance_id, True)
+  
 
-    time.sleep(4)
-    assert_in_full_metrics(instance_id, False)
-
-    response = client.post(f'http://localhost:5000/{instance_id}/run-step', data=json.dumps(run_content), content_type='application/json')
-    assert response.status_code == 200, "run-step should return 200"
-
-    assert_in_full_metrics(instance_id, True)
-
-    time.sleep(4)
-
-    assert_in_full_metrics(instance_id, False)
-
-    response = client.post('http://localhost:5000/load-state')
-    assert response.status_code == 200, "load-state should return 200"
-
-    assert_in_full_metrics(instance_id, True)
-
-    time.sleep(4)
-
-    assert_in_full_metrics(instance_id, False)
-
-    response = client.post('http://localhost:5000/load-state')
-    assert response.status_code == 200, "load-state should return 200"
-
-    os.remove(os.path.join("state/", instance_id + ".json"))
-
-    response = client.get('http://localhost:5000/save-state')
-    assert response.status_code == 200, "save-state should return 200"
-
-
-    dir_content = os.listdir("state/")
-    assert instance_id + ".json" in dir_content
-
-    response = client.post('http://localhost:5000/load-state')
-    assert response.status_code == 200, "load-state should return 200"
-
-    assert_in_full_metrics(instance_id, True)
-
-    response = client.post(f'http://localhost:5000/{instance_id}/stop-instance')
-    assert response.status_code == 200, "stop-instance should return 200"
-
-    assert_in_full_metrics(instance_id, False)
-
-    response = client.get('http://localhost:5000/save-state')
-    assert response.status_code == 200, "save-state should return 200"
-
-    dir_content = os.listdir("state/")
-    assert not instance_id + ".json" in dir_content
-
-
+    

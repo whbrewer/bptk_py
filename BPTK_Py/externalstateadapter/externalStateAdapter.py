@@ -20,14 +20,7 @@ class ExternalStateAdapter(metaclass=ABCMeta):
     def __init__(self, compress: bool):
         self.compress = compress
 
-    def save_state(self, state: list[InstanceState]):
-        if(self.compress):
-            for cur_state in state:
-                if(cur_state is not None and cur_state.state is not None):
-                    cur_state.state["settings_log"] = statecompression.compress_settings(cur_state.state["settings_log"])
-                    cur_state.state["results_log"] = statecompression.compress_results(cur_state.state["results_log"])
-        
-        return self._save_state(state)
+  
 
     def save_instance(self, state: InstanceState):
         if(self.compress and state is not None and state.state is not None):
@@ -35,20 +28,6 @@ class ExternalStateAdapter(metaclass=ABCMeta):
                 state.state["results_log"] = statecompression.compress_results(state.state["results_log"])
         return self._save_instance(state)
 
-    def load_state(self) -> list[InstanceState]:
-        state = self._load_state()
-        if(self.compress):
-            for cur_state in state:
-                if(cur_state is not None and cur_state.state is not None):
-                    cur_state.state["settings_log"] = statecompression.decompress_settings(cur_state.state["settings_log"])
-                    cur_state.state["results_log"] = statecompression.decompress_results(cur_state.state["results_log"])
-
-        # Always restore numeric keys in scenario_cache (no compression, just JSON key conversion fix)
-        for cur_state in state:
-            if(cur_state is not None and cur_state.state is not None):
-                if "scenario_cache" in cur_state.state:
-                    cur_state.state["scenario_cache"] = self._restore_numeric_keys(cur_state.state["scenario_cache"])
-        return state
 
     def load_instance(self, instance_uuid: str) -> InstanceState:
         state = self._load_instance(instance_uuid)
@@ -95,16 +74,10 @@ class ExternalStateAdapter(metaclass=ABCMeta):
 
         return restored
 
-    @abstractmethod
-    def _save_state(self, state: list[InstanceState]):
-        pass
+ 
 
     @abstractmethod
     def _save_instance(self, state: InstanceState):
-        pass
-
-    @abstractmethod
-    def _load_state(self) -> list[InstanceState]:
         pass
 
     @abstractmethod

@@ -228,8 +228,6 @@ class BptkServer(Flask):
         self.route("/<instance_uuid>/keep-alive", methods=['POST'], strict_slashes=False)(self._keep_alive_resource)
         self.route("/metrics", methods=['GET'], strict_slashes=False)(self._metrics_resource)
         self.route("/full-metrics", methods=['GET'], strict_slashes=False)(self._full_metrics_resource)
-        self.route("/save-state", methods=['GET'], strict_slashes=False)(self._save_state_resource)
-        self.route("/load-state", methods=['POST'], strict_slashes=False)(self._load_state_resource)
         self.route("/<instance_uuid>/stop-instance", methods=['POST'], strict_slashes=False)(self._stop_instance_resource)
 
     def token_required(f):
@@ -290,40 +288,7 @@ class BptkServer(Flask):
         resp.headers['Access-Control-Allow-Origin']='*'
         return resp
 
-    @token_required
-    def _save_state_resource(self):
-        """
-        Save all instances with the provided external state adapter.
-        """
-        if(self._external_state_adapter == None):
-            return
-
-        instance_states = self._instance_manager.get_instance_states()
-        self._external_state_adapter.save_state(instance_states)
-
-        resp = make_response(jsonpickle.dumps(instance_states), 200)
-        resp.headers['Content-Type']='application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
     
-    @token_required
-    def _load_state_resource(self):
-        """
-        Loads all instances using the external state adapter
-        """
-        
-        if(self._external_state_adapter == None):
-            return
-
-        result = self._external_state_adapter.load_state()
-
-        for instance_data in result:
-            self._instance_manager.reconstruct_instance(instance_data.instance_id, instance_data.timeout, instance_data.time, instance_data.state)
-
-        resp = make_response("Success", 200)
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
-
     def _metrics_resource(self):
         """
         Returns metrics in a prometheus compatible format.
