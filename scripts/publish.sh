@@ -30,6 +30,7 @@ cd ..
 python3 -m venv venv_temp
 source ./venv_temp/bin/activate
 pip install pytest
+pip install python-dotenv
 pip install -e .
 
 if ! pytest ./ ; then
@@ -83,6 +84,7 @@ sleep 8
 python3 -m venv venv_temp
 source ./venv_temp/bin/activate
 pip install pytest
+pip install python-dotenv
 pip install --index-url https://test.pypi.org/simple/ bptk_py --extra-index-url https://pypi.org/simple
 
 if ! pytest ./; then
