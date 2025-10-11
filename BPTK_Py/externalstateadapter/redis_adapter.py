@@ -4,6 +4,7 @@ import jsonpickle.handlers
 import redis
 import numpy as np
 from .externalStateAdapter import ExternalStateAdapter, InstanceState
+from ..logger import log
 
 # Try to configure ujson backend, but fall back gracefully if not available
 try:
@@ -12,10 +13,10 @@ try:
     jsonpickle.set_preferred_backend('ujson')
     jsonpickle.set_encoder_options('ujson', ensure_ascii=False, sort_keys=True)
     jsonpickle.set_decoder_options('ujson', precise_float=True)
-    print("jsonpickle configured to use ujson backend")
+    log("[INFO] jsonpickle configured to use ujson backend")
 except (ImportError, AssertionError) as e:
     # Fall back to default JSON backend if ujson is not available
-    print(f"ujson not available ({e}), using default JSON backend")
+    log(f"[INFO] ujson not available ({e}), using default JSON backend")
     pass
 
 # Configure safer numpy serialization - convert to native Python types
@@ -69,6 +70,7 @@ class RedisAdapter(ExternalStateAdapter):
         super().__init__(compress)
         self._redis_client = redis_client
         self._key_prefix = key_prefix
+        log(f"[INFO] RedisAdapter initialized with key_prefix: {key_prefix}, compression: {compress}")
 
     def _get_instance_key(self, instance_uuid: str) -> str:
         """Generate Redis key for an instance."""
@@ -78,16 +80,21 @@ class RedisAdapter(ExternalStateAdapter):
     def _load_instance(self, instance_uuid: str) -> InstanceState:
         """Load a single instance from Redis."""
         key = self._get_instance_key(instance_uuid)
-        data = self._redis_client.get(key)
-
-        if data is None:
-            return None
+        log(f"[INFO] Loading instance {instance_uuid} from Redis key: {key}")
 
         try:
+            data = self._redis_client.get(key)
+
+            if data is None:
+                log(f"[INFO] No data found in Redis for instance {instance_uuid}")
+                return None
+
+            log(f"[INFO] Data retrieved from Redis for instance {instance_uuid}")
             instance_data = jsonpickle.decode(data)
 
             state = jsonpickle.decode(instance_data["state"]) if instance_data["state"] is not None else None
-           
+
+            log(f"[INFO] Decoding instance data for {instance_uuid}")
             result = InstanceState(
                 state=state,
                 instance_id=instance_data["instance_id"],
@@ -95,9 +102,14 @@ class RedisAdapter(ExternalStateAdapter):
                 timeout=instance_data["timeout"],
                 step=instance_data["step"]
             )
-         
+
+            log(f"[INFO] Instance {instance_uuid} loaded successfully from Redis")
             return result
         except (KeyError, ValueError, TypeError) as e:
+            log(f"[ERROR] Failed to load instance {instance_uuid} from Redis: {str(e)}")
+            return None
+        except Exception as e:
+            log(f"[ERROR] Unexpected error loading instance {instance_uuid} from Redis: {str(e)}")
             return None
 
   
@@ -106,12 +118,15 @@ class RedisAdapter(ExternalStateAdapter):
         Override the base class method to handle compression/decompression internally.
         This prevents double decompression issues similar to FileAdapter.
         """
+        log(f"[INFO] RedisAdapter loading instance {instance_uuid}")
         state = self._load_instance(instance_uuid)
 
         # Apply scenario_cache numeric key restoration (no compression, just JSON key conversion fix)
         if(state is not None and state.state is not None):
             if "scenario_cache" in state.state:
+                log(f"[INFO] Restoring numeric keys in scenario_cache for instance {instance_uuid}")
                 state.state["scenario_cache"] = self._restore_numeric_keys(state.state["scenario_cache"])
+                log(f"[INFO] Numeric keys restored for instance {instance_uuid}")
 
         return state
 
@@ -120,21 +135,33 @@ class RedisAdapter(ExternalStateAdapter):
         Override the base class method to handle compression internally.
         This prevents double compression issues similar to FileAdapter.
         """
+        log(f"[INFO] RedisAdapter saving instance {state.instance_id if state else 'None'}")
         return self._save_instance(state)
 
     def delete_instance(self, instance_uuid: str):
         """Delete an instance from Redis."""
         key = self._get_instance_key(instance_uuid)
-        self._redis_client.delete(key)
+        log(f"[INFO] Deleting instance {instance_uuid} from Redis key: {key}")
+        try:
+            result = self._redis_client.delete(key)
+            if result > 0:
+                log(f"[INFO] Instance {instance_uuid} deleted successfully from Redis")
+            else:
+                log(f"[WARN] Instance {instance_uuid} not found in Redis")
+        except Exception as e:
+            log(f"[ERROR] Failed to delete instance {instance_uuid} from Redis: {str(e)}")
+            raise
 
     def _save_instance(self, instance_state: InstanceState):
         """Save a single instance to Redis."""
         if instance_state is None or instance_state.instance_id is None:
+            log("[WARN] Cannot save instance: instance_state or instance_id is None")
             return
 
-       
+        log(f"[INFO] _save_instance called for instance {instance_state.instance_id}")
         try:
             # Prepare data for storage with make_refs=False to prevent py/id issues
+            log(f"[INFO] Preparing data for Redis storage for instance {instance_state.instance_id}")
             redis_data = {
                 "state": jsonpickle.encode(instance_state.state, make_refs=False) if instance_state.state is not None else None,
                 "instance_id": instance_state.instance_id,
@@ -144,12 +171,15 @@ class RedisAdapter(ExternalStateAdapter):
             }
 
             key = self._get_instance_key(instance_state.instance_id)
+            log(f"[INFO] Storing instance {instance_state.instance_id} to Redis key: {key}")
 
             # Store data with make_refs=False to prevent object reference issues
             self._redis_client.set(key, jsonpickle.encode(redis_data, make_refs=False))
+            log(f"[INFO] Instance {instance_state.instance_id} stored successfully in Redis")
 
             # Set TTL based on timeout if specified
             if instance_state.timeout:
+                log(f"[INFO] Setting TTL for instance {instance_state.instance_id} based on timeout: {instance_state.timeout}")
                 timeout_seconds = (
                     instance_state.timeout.get("weeks", 0) * 7 * 24 * 3600 +
                     instance_state.timeout.get("days", 0) * 24 * 3600 +
@@ -161,8 +191,10 @@ class RedisAdapter(ExternalStateAdapter):
                 )
                 if timeout_seconds > 0:
                     self._redis_client.expire(key, int(timeout_seconds))
+                    log(f"[INFO] TTL set to {int(timeout_seconds)} seconds for instance {instance_state.instance_id}")
 
         except Exception as error:
-            print(f"Error saving instance {instance_state.instance_id}: {error}")
+            log(f"[ERROR] Error saving instance {instance_state.instance_id} to Redis: {error}")
+            raise
 
   

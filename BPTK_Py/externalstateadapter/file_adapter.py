@@ -3,11 +3,13 @@ import jsonpickle
 import os
 from .externalStateAdapter import ExternalStateAdapter, InstanceState
 from ..util import statecompression
+from ..logger import log
 
 class FileAdapter(ExternalStateAdapter):
     def __init__(self, compress: bool, path: str):
         super().__init__(compress)
         self.path = path
+        log(f"[INFO] FileAdapter initialized with path: {path}, compression: {compress}")
 
     def _is_already_compressed_results(self, results_log):
         """
@@ -61,25 +63,34 @@ class FileAdapter(ExternalStateAdapter):
 
 
     def _save_instance(self, state: InstanceState):
+        log(f"[INFO] FileAdapter _save_instance called for instance {state.instance_id if state else 'None'}")
         # Apply compression for settings_log and results_log (scenario_cache compression is disabled)
         if self.compress and state is not None and state.state is not None:
+            log(f"[INFO] Compression enabled, processing state for instance {state.instance_id}")
             # Create a copy to avoid modifying the original state
             state_copy = state.state.copy()
             if "settings_log" in state_copy:
                 try:
+                    log(f"[INFO] Compressing settings_log for instance {state.instance_id}")
                     state_copy["settings_log"] = statecompression.compress_settings(state_copy["settings_log"])
+                    log(f"[INFO] settings_log compressed successfully for instance {state.instance_id}")
                 except Exception as e:
-                   pass
+                    log(f"[WARN] Failed to compress settings_log for instance {state.instance_id}: {str(e)}")
+                    pass
                     # Keep original data if compression fails
             if "results_log" in state_copy:
                 # Check if data is already in compressed format by looking at the structure
                 results_log = state_copy["results_log"]
                 if results_log and self._is_already_compressed_results(results_log):
+                    log(f"[INFO] results_log already compressed for instance {state.instance_id}, skipping compression")
                     pass
                 else:
                     try:
+                        log(f"[INFO] Compressing results_log for instance {state.instance_id}")
                         state_copy["results_log"] = statecompression.compress_results(state_copy["results_log"])
+                        log(f"[INFO] results_log compressed successfully for instance {state.instance_id}")
                     except Exception as e:
+                        log(f"[WARN] Failed to compress results_log for instance {state.instance_id}: {str(e)}")
                         pass
                         # Keep original data if compression fails
         else:
@@ -96,9 +107,15 @@ class FileAdapter(ExternalStateAdapter):
         }
 
         file_path = os.path.join(self.path, str(state.instance_id) + ".json")
-        f = open(file_path, "w")
-        f.write(jsonpickle.dumps(data))
-        f.close()
+        log(f"[INFO] Writing instance {state.instance_id} to file: {file_path}")
+        try:
+            f = open(file_path, "w")
+            f.write(jsonpickle.dumps(data))
+            f.close()
+            log(f"[INFO] Instance {state.instance_id} saved successfully to {file_path}")
+        except Exception as e:
+            log(f"[ERROR] Failed to write instance {state.instance_id} to file {file_path}: {str(e)}")
+            raise
 
 
     def _load_state(self) -> list[InstanceState]:
@@ -145,30 +162,38 @@ class FileAdapter(ExternalStateAdapter):
             if self.compress and decoded_data is not None:
                 if "settings_log" in decoded_data:
                     try:
+                        log(f"[INFO] Decompressing settings_log for instance {instance_uuid}")
                         decoded_data["settings_log"] = statecompression.decompress_settings(decoded_data["settings_log"])
+                        log(f"[INFO] settings_log decompressed successfully for instance {instance_uuid}")
                     except Exception as e:
+                        log(f"[WARN] Failed to decompress settings_log for instance {instance_uuid}: {str(e)}")
                         pass
                         # Keep original data if decompression fails
                 if "results_log" in decoded_data:
                     results_log = decoded_data["results_log"]
                     if self._is_already_compressed_results(results_log):
                         try:
+                            log(f"[INFO] Decompressing results_log for instance {instance_uuid}")
                             decoded_data["results_log"] = statecompression.decompress_results(decoded_data["results_log"])
+                            log(f"[INFO] results_log decompressed successfully for instance {instance_uuid}")
                         except Exception as e:
+                            log(f"[WARN] Failed to decompress results_log for instance {instance_uuid}: {str(e)}")
                             pass
                     else:
-                        print(f"[FileAdapter] Results_log doesn't appear to be compressed, skipping decompression")
+                        log(f"[INFO] Results_log doesn't appear to be compressed for instance {instance_uuid}, skipping decompression")
 
             result = InstanceState(decoded_data, instance_id, time, timeout, step)
             return result
         except Exception as e:
-            print(f"[FileAdapter] Error loading instance {instance_uuid}: {str(e)}")
+            log(f"[ERROR] Error loading instance {instance_uuid}: {str(e)}")
             return None
 
     def delete_instance(self, instance_uuid: str):
         file_path = os.path.join(self.path, str(instance_uuid) + ".json")
-        print(f"[FileAdapter] delete_instance called for {instance_uuid}, file: {file_path}")
+        log(f"[INFO] Deleting instance {instance_uuid}, file: {file_path}")
         try:
             os.remove(file_path)
+            log(f"[INFO] Instance {instance_uuid} deleted successfully")
         except Exception as e:
-            print(f"[FileAdapter] Error deleting instance {instance_uuid}: {str(e)}")
+            log(f"[ERROR] Error deleting instance {instance_uuid}: {str(e)}")
+            raise
