@@ -6,7 +6,7 @@ test:
     pip install . && pytest ./
 
 # Publish BPTK
-publish_bptk:
+publish:
     cd scripts && ./publish.sh
 
 # Publish without tests
