@@ -45,7 +45,7 @@ For any questions our suggestions you have regarding BPTK, please contact us at:
 
 * Add externalStateAdapters for Postgres and Redis
 * Add option to exteranlize state completely, thus turning bptkServer into a stateless server
-* Add optional logging via logfire
+* Add pydantic logfire as logging backend
 
 ### 2.1.1
 
