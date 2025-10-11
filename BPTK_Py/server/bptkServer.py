@@ -283,7 +283,7 @@ class BptkServer(Flask):
         if self._external_state_adapter != None:
             self._external_state_adapter.delete_instance(instance_uuid)
 
-        resp = make_response("Instance deleted.", 200)
+        resp = make_response('{"msg": "Instance deleted."}', 200)
         resp.headers['Content-Type']='application/json'
         resp.headers['Access-Control-Allow-Origin']='*'
         return resp
