@@ -62,23 +62,17 @@ class TestFileAdapter:
         output = new_stdout.getvalue()
 
         assert return_value is None
-        assert "[FileAdapter] _load_instance called for 123, file: invalid_path/123.json" in output
+        assert "[Errno 2] No such file or directory" in output
 
     def testFileAdapter_delete_instance_execption(self, compress):
         fileAdapter = FileAdapter(compress=compress, path="invalid_path")
 
-        #Redirect the console output
-        old_stdout = sys.stdout
-        new_stdout = io.StringIO()
-        sys.stdout = new_stdout 
+        # Test that delete_instance raises an exception for invalid path
+        with pytest.raises(Exception) as exc_info:
+            fileAdapter.delete_instance(instance_uuid="123")
 
-        fileAdapter.delete_instance(instance_uuid="123")
-
-        #Remove the redirection of the console output
-        sys.stdout = old_stdout
-        output = new_stdout.getvalue()
-
-        assert "[FileAdapter] delete_instance called for 123, file: invalid_path/123.json" in output
+        # Check that the exception message contains the expected error
+        assert "No such file or directory" in str(exc_info.value) or "cannot find the path" in str(exc_info.value)
 
 @pytest.fixture
 def temp_dir():
