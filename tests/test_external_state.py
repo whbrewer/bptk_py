@@ -333,7 +333,7 @@ def test_external_state_redis(redis_client_fixture):
     external_state_base(redis_client_fixture)
 
 
-def test_instance_timeouts(file_client_fixture):
+def test_instance_timeouts(file_client_fixture, externalize_state_completely):
     client = file_client_fixture
     def assert_in_full_metrics(instance_id, contains: bool):
         response = client.get('/full-metrics')
@@ -389,8 +389,12 @@ def test_instance_timeouts(file_client_fixture):
     response = client.post(f'http://localhost:5000/{instance_id}/run-step', data=json.dumps(run_content), content_type='application/json')
     assert response.status_code == 200,"run-step should return 200"
 
-    dir_content = os.listdir("state/")
-    assert instance_id + ".json" in dir_content
+    # Only check for file existence if we're externalizing state completely
+    # When externalize_state_completely=False, the instance is kept in memory
+    # and only saved to the adapter during cleanup
+    if externalize_state_completely:
+        dir_content = os.listdir("state/")
+        assert instance_id + ".json" in dir_content
 
   
 

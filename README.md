@@ -41,6 +41,10 @@ For any questions our suggestions you have regarding BPTK, please contact us at:
 
 ## Changelog
 
+### 2.2.1
+
+* Improve logfire logging.
+
 ### 2.2.0
 
 * Add externalStateAdapters for Postgres and Redis

@@ -16,8 +16,9 @@ if(version[0] < 3 or (version[0] == 3 and version[1] < 9)):
     sys.exit()
 
 
-from flask import Flask, redirect, url_for, request, make_response, jsonify, Response
+from flask import Flask, redirect, url_for, request, make_response, jsonify, Response, g
 from BPTK_Py.bptk import bptk
+from BPTK_Py.logger import logger as log_module
 import pandas as pd
 import json
 import copy
@@ -116,7 +117,10 @@ class InstanceManager:
 
     def _delete_instance(self, instance_id):
         if instance_id in self._instances:
+            log_module.log(f"[INFO] _delete_instance: Deleting instance {instance_id} from memory")
             del self._instances[instance_id]
+        else:
+            log_module.log(f"[INFO] _delete_instance: Instance {instance_id} not found in memory")
 
     def create_instance(self,**timeout):
         """
@@ -160,6 +164,7 @@ class InstanceManager:
         }
 
         self._instances[instance_uuid] = instance_data
+        log_module.log(f"[INFO] _add_instance: Added instance {instance_uuid} to memory")
 
     def _timeout_instances(self):
         """
@@ -230,6 +235,8 @@ class BptkServer(Flask):
         self.route("/full-metrics", methods=['GET'], strict_slashes=False)(self._full_metrics_resource)
         self.route("/<instance_uuid>/stop-instance", methods=['POST'], strict_slashes=False)(self._stop_instance_resource)
 
+        # Note: Cleanup is now handled directly in endpoints via _cleanup_instance_if_needed()
+
     def token_required(f):
         @wraps(f)
         def decorated(self, *args, **kwargs):
@@ -249,44 +256,76 @@ class BptkServer(Flask):
             return f(self, *args, **kwargs)
         return decorated
 
-    @staticmethod
-    def auto_cleanup_instance(f):
-        @wraps(f)
-        def decorated(self, instance_uuid, *args, **kwargs):
+    def _cleanup_instance_if_needed(self, instance_uuid):
+        """
+        Directly cleanup an instance if external state is configured.
+        This is called at the end of endpoints that need cleanup.
+        Runs synchronously to avoid race conditions and simplify debugging.
+        """
+        if self._external_state_adapter and self._externalize_state_completely:
             try:
-                result = f(self, instance_uuid, *args, **kwargs)
-                if self._external_state_adapter:
-                    # Save instance state to external storage before deleting
-                    instance_state = self._instance_manager._get_instance_state(instance_uuid)
-                    if instance_state:
-                        self._external_state_adapter.save_instance(instance_state)
+                log_module.log(f"[INFO] Cleanup: Processing instance {instance_uuid}")
+                # Save instance state to external storage
+                instance_state = self._instance_manager._get_instance_state(instance_uuid)
+                if instance_state:
+                    log_module.log(f"[INFO] Cleanup: Saving state for instance {instance_uuid}")
+                    self._external_state_adapter.save_instance(instance_state)
 
-                    if self._externalize_state_completely:    
-                        self._instance_manager._delete_instance(instance_uuid)
-                return result
+                # Delete instance from memory
+                log_module.log(f"[INFO] Cleanup: Deleting instance {instance_uuid} from memory")
+                self._instance_manager._delete_instance(instance_uuid)
+                log_module.log(f"[INFO] Cleanup: Completed for instance {instance_uuid}")
             except Exception as e:
-                if self._external_state_adapter:
-                    # Save instance state to external storage before deleting, even on exception
+                log_module.log(f"[ERROR] Cleanup failed for instance {instance_uuid}: {str(e)}")
+
+    def _cleanup_new_instances_if_needed(self, instance_uuids):
+        """
+        Directly cleanup newly created instances if external state is configured.
+        This is called at the end of start_instance(s) endpoints.
+        Runs synchronously to avoid race conditions and simplify debugging.
+        """
+        if self._external_state_adapter and self._externalize_state_completely and instance_uuids:
+            try:
+                log_module.log(f"[INFO] Cleanup: Processing {len(instance_uuids)} new instances")
+                for instance_uuid in instance_uuids:
                     try:
+                        # Save instance state to external storage
                         instance_state = self._instance_manager._get_instance_state(instance_uuid)
-                        if instance_state and self._external_state_adapter:
+                        if instance_state:
+                            log_module.log(f"[INFO] Cleanup: Saving new instance {instance_uuid}")
                             self._external_state_adapter.save_instance(instance_state)
-                    except:
-                        pass  # Don't let save errors mask the original exception
-                    self._instance_manager._delete_instance(instance_uuid)
-                raise e
-        return decorated
+
+                        # Delete instance from memory
+                        log_module.log(f"[INFO] Cleanup: Deleting new instance {instance_uuid} from memory")
+                        self._instance_manager._delete_instance(instance_uuid)
+                    except Exception as e:
+                        log_module.log(f"[ERROR] Cleanup failed for new instance {instance_uuid}: {str(e)}")
+                log_module.log(f"[INFO] Cleanup: Completed for new instances")
+            except Exception as e:
+                log_module.log(f"[ERROR] Cleanup error: {str(e)}")
+
+    # Note: Cleanup is now handled directly in endpoints via _cleanup_instance_if_needed()
+    # and _cleanup_new_instances_if_needed() methods
 
     @token_required
     def _stop_instance_resource(self, instance_uuid):
-        self._instance_manager._delete_instance(instance_uuid)
-        if self._external_state_adapter != None:
-            self._external_state_adapter.delete_instance(instance_uuid)
+        # explicitly deletes the instance as its primary function
+        with log_module.span("stop_instance", endpoint="/stop-instance", instance_uuid=instance_uuid):
+            self._instance_manager._delete_instance(instance_uuid)
+            if self._external_state_adapter != None:
+                try:
+                    self._external_state_adapter.delete_instance(instance_uuid)
+                except FileNotFoundError:
+                    # Instance might not have been saved to external adapter yet
+                    # (when externalize_state_completely=False)
+                    log_module.log(f"[INFO] Instance {instance_uuid} not found in external adapter (may have been in-memory only)")
+                except Exception as e:
+                    log_module.log(f"[WARN] Failed to delete instance {instance_uuid} from external adapter: {e}")
 
-        resp = make_response('{"msg": "Instance deleted."}', 200)
-        resp.headers['Content-Type']='application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
+            resp = make_response('{"msg": "Instance deleted."}', 200)
+            resp.headers['Content-Type']='application/json'
+            resp.headers['Access-Control-Allow-Origin']='*'
+            return resp
 
     
     def _metrics_resource(self):
@@ -332,6 +371,9 @@ class BptkServer(Flask):
             return resp
 
         content = request.get_json()
+        
+        log_module.log(f"[INFO] Running scenarios")
+
 
         try:
             settings = content["settings"]
@@ -573,33 +615,31 @@ class BptkServer(Flask):
         Arguments: timeout (dict,optional)
             The timeout period after which the instance is delete if it is not accessed in the meantime. The timer is reset every time the instance is accessed. The timeout dictionary can have the following keys: weeks, days, hours, minutes, seconds, milliseconds, microseconds. Values must be integers.
         """
+        with log_module.span("start_instance", endpoint="/start-instance"):
+            # store the new instance in the instance dictionary.
+            timeout = {"weeks":0, "days":0, "hours":12, "minutes":0,"seconds":0,"milliseconds":0,"microseconds":0}
+            instances = 1
 
-        # store the new instance in the instance dictionary.
-        timeout = {"weeks":0, "days":0, "hours":12, "minutes":0,"seconds":0,"milliseconds":0,"microseconds":0}
-        instances = 1
-        
-        if request.is_json:
-            content = request.get_json()
-            if "timeout" in content:
-                timeout = content["timeout"]
-        instance_uuid = self._instance_manager.create_instance(**timeout)
+            if request.is_json:
+                content = request.get_json()
+                if "timeout" in content:
+                    timeout = content["timeout"]
+            instance_uuid = self._instance_manager.create_instance(**timeout)
 
-        if instance_uuid is not None:
-            # If externalizing state completely, save the new instance to external storage
-            if self._externalize_state_completely and self._external_state_adapter:
-                instance_state = self._instance_manager._get_instance_state(instance_uuid)
-                self._instance_manager._delete_instance(instance_uuid)
-                if instance_state:
-                    self._external_state_adapter.save_instance(instance_state)
+            if instance_uuid is not None:
+                response_data = {"instance_uuid":instance_uuid,"timeout":timeout}
+                resp = make_response(json.dumps(response_data), 200)
+            else:
+                resp = make_response('{"error": "instance could not be started"}', 500)
 
-            response_data = {"instance_uuid":instance_uuid,"timeout":timeout}
-            resp = make_response(json.dumps(response_data), 200)
-        else:
-            resp = make_response('{"error": "instance could not be started"}', 500)
+            resp.headers['Content-Type']='application/json'
+            resp.headers['Access-Control-Allow-Origin']='*'
 
-        resp.headers['Content-Type']='application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
+            # Cleanup new instance if needed (for stateless operation)
+            if instance_uuid:
+                self._cleanup_new_instances_if_needed([instance_uuid])
+
+            return resp
 
     @token_required
     def _start_instances_resource(self):
@@ -621,128 +661,155 @@ class BptkServer(Flask):
         for i in range(instances):
             instance_uuid = self._instance_manager.create_instance(**timeout)
             instance_uuids.append(instance_uuid)
-            # If externalizing state completely, save each new instance to external storage
-            if self._externalize_state_completely and self._external_state_adapter:
-                instance_state = self._instance_manager._get_instance_state(instance_uuid)
-                self._instance_manager._delete_instance(instance_uuid)
-                if instance_state:
-                    self._external_state_adapter.save_instance(instance_state)
 
         response_data={"instance_uuids":instance_uuids,"timeout":timeout}
-        
+
         resp = make_response(json.dumps(response_data), 200)
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin'] = '*'
+
+        # Cleanup new instances if needed (for stateless operation)
+        if instance_uuids:
+            self._cleanup_new_instances_if_needed(instance_uuids)
+
         return resp
 
     @token_required
-    @auto_cleanup_instance
     def _begin_session_resource(self, instance_uuid):
         """This endpoint starts a session for single step simulation. There can only be one session per instance at a time.
-        Currently only System Dynamics scenarios are supported for both SD DSL and XMILE models.
+            Currently only System Dynamics scenarios are supported for both SD DSL and XMILE models.
         """
+        with log_module.span("begin_session", endpoint="/begin-session", instance_uuid=instance_uuid):
+            if not request.is_json:
+                resp = make_response('{"error": "please pass the request with content-type application/json"}', 500)
+                resp.headers['Content-Type'] = 'application/json'
+                resp.headers['Access-Control-Allow-Origin'] = '*'
 
-        if not request.is_json:
-            resp = make_response('{"error": "please pass the request with content-type application/json"}', 500)
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+
+            # Checking if the instance id is valid.
+            if not self._ensure_instance_exists(instance_uuid):
+                resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
+                resp.headers['Content-Type'] = 'application/json'
+                resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+
+            content = request.get_json()
+
+            try:
+                scenario_managers = content["scenario_managers"]
+            except KeyError:
+                resp = make_response('{"error": "expecting scenario_managers to be set"}',500)
+                resp.headers['Content-Type']='application/json'
+                resp.headers['Access-Control-Allow-Origin']='*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+
+            try:
+                scenarios = content["scenarios"]
+            except KeyError:
+                resp = make_response('{"error": "expecting scenarios to be set"}', 500)
+                resp.headers['Content-Type']='application/json'
+                resp.headers['Access-Control-Allow-Origin']='*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+            equations = []
+            agents = []
+            agent_states=[]
+            agent_properties=[]
+            agent_property_types=[]
+            individual_agent_properties=[]
+            settings = {}
+
+            if(not "agents" in content.keys() and not "equations" in content.keys()):
+                resp = make_response('{"error": "expecting either equations or agents to be set"}', 500)
+                resp.headers['Content-Type']='application/json'
+                resp.headers['Access-Control-Allow-Origin']='*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+            if("agents" in content.keys()):
+                agents = content["agents"]
+            if("equations" in content.keys()):
+                equations = content["equations"]
+            if("agent_states" in content.keys()):
+                agent_states = content["agent_states"]
+            if("agent_properties" in content.keys()):
+                agent_properties = content["agent_properties"]
+            if("agent_property_types" in content.keys()):
+                agent_property_types = content["agent_property_types"]
+            if("individual_agent_properties" in content.keys()):
+                individual_agent_properties = content["individual_agent_properties"]
+            if("settings" in content.keys()):
+                settings = content["settings"]
+
+            instance = self._instance_manager.get_instance(instance_uuid)
+
+            instance.begin_session(
+                scenario_managers=scenario_managers,
+                scenarios=scenarios,
+                settings=settings,
+                equations=equations,
+                agents=agents,
+                agent_states=agent_states,
+                agent_properties=agent_properties,
+                agent_property_types=agent_property_types,
+                individual_agent_properties=individual_agent_properties
+            )
+
+            resp = make_response('{"msg":"session started"}', 200)
             resp.headers['Content-Type'] = 'application/json'
-            resp.headers['Access-Control-Allow-Origin'] = '*'
-            return resp
-
-        # Checking if the instance id is valid.
-        if not self._ensure_instance_exists(instance_uuid):
-            resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
-            resp.headers['Content-Type'] = 'application/json'
-            resp.headers['Access-Control-Allow-Origin'] = '*'
-            return resp
-
-        content = request.get_json()
-
-        try:
-            scenario_managers = content["scenario_managers"]
-        except KeyError:
-            resp = make_response('{"error": "expecting scenario_managers to be set"}',500)
-            resp.headers['Content-Type']='application/json'
             resp.headers['Access-Control-Allow-Origin']='*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
-
-        try:
-            scenarios = content["scenarios"]
-        except KeyError:
-            resp = make_response('{"error": "expecting scenarios to be set"}', 500)
-            resp.headers['Content-Type']='application/json'
-            resp.headers['Access-Control-Allow-Origin']='*'
-            return resp
-        equations = []
-        agents = []
-        agent_states=[]
-        agent_properties=[]
-        agent_property_types=[]
-        individual_agent_properties=[]
-        settings = {}
-
-        if(not "agents" in content.keys() and not "equations" in content.keys()):
-            resp = make_response('{"error": "expecting either equations or agents to be set"}', 500)
-            resp.headers['Content-Type']='application/json'
-            resp.headers['Access-Control-Allow-Origin']='*'
-            return resp
-        if("agents" in content.keys()):
-            agents = content["agents"]
-        if("equations" in content.keys()):
-            equations = content["equations"]
-        if("agent_states" in content.keys()):
-            agent_states = content["agent_states"]
-        if("agent_properties" in content.keys()):
-            agent_properties = content["agent_properties"]
-        if("agent_property_types" in content.keys()):
-            agent_property_types = content["agent_property_types"]
-        if("individual_agent_properties" in content.keys()):
-            individual_agent_properties = content["individual_agent_properties"]
-        if("settings" in content.keys()):
-            settings = content["settings"]
-
-
-
-        instance = self._instance_manager.get_instance(instance_uuid)
-
-        instance.begin_session(
-            scenario_managers=scenario_managers,
-            scenarios=scenarios,
-            settings=settings,
-            equations=equations,
-            agents=agents,
-            agent_states=agent_states,
-            agent_properties=agent_properties,
-            agent_property_types=agent_property_types,
-            individual_agent_properties=individual_agent_properties
-        )
-
-        resp = make_response('{"msg":"session started"}', 200)
-        resp.headers['Content-Type'] = 'application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
 
     @token_required
-    @auto_cleanup_instance
     def _end_session_resource(self, instance_uuid):
         """This endpoint ends a session for single step simulation and resets the internal cache.
         """
-        # Checking if the instance id is valid.
-        if not self._ensure_instance_exists(instance_uuid):
-            resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
+        with log_module.span("end_session", endpoint="/end-session", instance_uuid=instance_uuid):
+            # Checking if the instance id is valid.
+            if not self._ensure_instance_exists(instance_uuid):
+                resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
+                resp.headers['Content-Type'] = 'application/json'
+                resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+
+            instance = self._instance_manager.get_instance(instance_uuid)
+            instance.end_session()
+
+            resp = make_response('{"msg":"session terminated"}', 200)
             resp.headers['Content-Type'] = 'application/json'
-            resp.headers['Access-Control-Allow-Origin'] = '*'
+            resp.headers['Access-Control-Allow-Origin']='*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
 
-        instance = self._instance_manager.get_instance(instance_uuid)
-        instance.end_session()
-
-        resp = make_response('{"msg":"session terminated"}', 200)
-        resp.headers['Content-Type'] = 'application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
-
     @token_required
-    @auto_cleanup_instance
     def _flat_session_results_resource(self,instance_uuid):
         """
         Returns the accumulated results of a session, from the first step to the last step that was run in a flat format.
@@ -751,12 +818,15 @@ class BptkServer(Flask):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
             resp.headers['Content-Type'] = 'application/json'
             resp.headers['Access-Control-Allow-Origin'] = '*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
 
         return self._session_results_resource(instance_uuid, True)
 
     @token_required
-    @auto_cleanup_instance
     def _session_results_resource(self,instance_uuid,flat=False):
         """
         Returns the accumulated results of a session, from the first step to the last step that was run.
@@ -765,6 +835,10 @@ class BptkServer(Flask):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
             resp.headers['Content-Type'] = 'application/json'
             resp.headers['Access-Control-Allow-Origin'] = '*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
 
         instance = self._instance_manager.get_instance(instance_uuid)
@@ -773,10 +847,13 @@ class BptkServer(Flask):
         resp = make_response(json.dumps(result), 200)
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin'] = '*'
+
+        # Cleanup instance if needed (for stateless operation)
+        self._cleanup_instance_if_needed(instance_uuid)
+
         return resp
 
     @token_required
-    @auto_cleanup_instance
     def _run_step_resource(self, instance_uuid):
         """
         This endpoint advances the relevant scenarios by one timestep and returns the data for that timestep.
@@ -785,44 +862,60 @@ class BptkServer(Flask):
             instance_uuid: string
                 The id of the instance to advance.
         """
-        # Checking if the instance id is valid.
-        if not self._ensure_instance_exists(instance_uuid):
-            resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
-            resp.headers['Content-Type'] = 'application/json'
-            resp.headers['Access-Control-Allow-Origin'] = '*'
-            return resp
-        
-        instance = self._instance_manager.get_instance(instance_uuid)
-
-        if(instance.is_locked()):
-            resp = make_response('{"error": "instance is locked"}', 500)
-            resp.headers['Content-Type'] = 'application/json'
-            resp.headers['Access-Control-Allow-Origin'] = '*'
-            return resp
-
-        if not request.is_json:
-            result = instance.run_step()
-        else:
-            content = request.get_json()
-            if "settings" in content:
-                result = instance.run_step(settings=content["settings"], flat="flatResults" in content and content["flatResults"] == True)
-            else:
-                resp = make_response('{"error": "expecting settings to be set"}', 500)
+        with log_module.span("run_step", endpoint="/run-step", instance_uuid=instance_uuid):
+            # Checking if the instance id is valid.
+            if not self._ensure_instance_exists(instance_uuid):
+                resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
                 resp.headers['Content-Type'] = 'application/json'
                 resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
                 return resp
 
-        if result is not None:
-            resp = make_response(jsonpickle.dumps(result), 200)
-        else:
-            resp = make_response('{"error": "no data was returned from run_step"}', 500)
+            instance = self._instance_manager.get_instance(instance_uuid)
 
-        resp.headers['Content-Type'] = 'application/json'
-        resp.headers['Access-Control-Allow-Origin']='*'
-        return resp
+            if(instance.is_locked()):
+                resp = make_response('{"error": "instance is locked"}', 500)
+                resp.headers['Content-Type'] = 'application/json'
+                resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
+                return resp
+
+            if not request.is_json:
+                result = instance.run_step()
+            else:
+                content = request.get_json()
+                if "settings" in content:
+                    result = instance.run_step(settings=content["settings"], flat="flatResults" in content and content["flatResults"] == True)
+                else:
+                    resp = make_response('{"error": "expecting settings to be set"}', 500)
+                    resp.headers['Content-Type'] = 'application/json'
+                    resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                    # Cleanup instance if needed (for stateless operation)
+                    self._cleanup_instance_if_needed(instance_uuid)
+
+                    return resp
+
+            if result is not None:
+                resp = make_response(jsonpickle.dumps(result), 200)
+            else:
+                resp = make_response('{"error": "no data was returned from run_step"}', 500)
+
+            resp.headers['Content-Type'] = 'application/json'
+            resp.headers['Access-Control-Allow-Origin']='*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
+            return resp
 
     @token_required
-    @auto_cleanup_instance
     def _run_steps_resource(self, instance_uuid):
         """
         This endpoint advances the relevant scenarios by one timestep and returns the data for that timestep.
@@ -836,6 +929,10 @@ class BptkServer(Flask):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
             resp.headers['Content-Type'] = 'application/json'
             resp.headers['Access-Control-Allow-Origin'] = '*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
         
         result = []
@@ -845,12 +942,20 @@ class BptkServer(Flask):
                 resp = make_response('{"error": "please pass the request with content-type application/json"}',500)
                 resp.headers['Content-Type'] = 'application/json'
                 resp.headers['Access-Control-Allow-Origin']='*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
                 return resp
 
             if(instance.is_locked()):
                 resp = make_response('{"error": "instance is locked"}', 500)
                 resp.headers['Content-Type'] = 'application/json'
                 resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
                 return resp
             content = request.get_json()
             if "numberSteps" in content:
@@ -863,11 +968,19 @@ class BptkServer(Flask):
                     resp = make_response('{"error": "expecting settings to be set"}', 500)
                     resp.headers['Content-Type'] = 'application/json'
                     resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                    # Cleanup instance if needed (for stateless operation)
+                    self._cleanup_instance_if_needed(instance_uuid)
+
                     return resp
             else:
                 resp = make_response('{"error": "expecting a number of steps to be provided in the body as a json {"numberSteps": int}"}', 500)
                 resp.headers['Content-Type'] = 'application/json'
                 resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
                 return resp
         except:
             instance.unlock()
@@ -878,11 +991,14 @@ class BptkServer(Flask):
 
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin']='*'
+
+        # Cleanup instance if needed (for stateless operation)
+        self._cleanup_instance_if_needed(instance_uuid)
+
         return resp
 
 
     @token_required
-    @auto_cleanup_instance
     def _stream_steps_resource(self, instance_uuid):
         """
         This endpoint is used to stream a simulation.
@@ -897,6 +1013,10 @@ class BptkServer(Flask):
             resp = make_response('{"error": "expecting a valid instance id to be given"}', 500)
             resp.headers['Content-Type'] = 'application/json'
             resp.headers['Access-Control-Allow-Origin'] = '*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
         
         instance = self._instance_manager.get_instance(instance_uuid)
@@ -908,12 +1028,20 @@ class BptkServer(Flask):
                 resp = make_response('{"error": "expecting settings to be set"}', 500)
                 resp.headers['Content-Type'] = 'application/json'
                 resp.headers['Access-Control-Allow-Origin'] = '*'
+
+                # Cleanup instance if needed (for stateless operation)
+                self._cleanup_instance_if_needed(instance_uuid)
+
                 return resp
 
         if(instance.is_locked()):
             resp = make_response('{"error": "instance is locked"}', 500)
             resp.headers['Content-Type'] = 'application/json'
             resp.headers['Access-Control-Allow-Origin'] = '*'
+
+            # Cleanup instance if needed (for stateless operation)
+            self._cleanup_instance_if_needed(instance_uuid)
+
             return resp
 
         def streamer():
@@ -942,11 +1070,14 @@ class BptkServer(Flask):
         resp = Response(streamer())
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin'] = '*'
+
+        # Cleanup instance if needed (for stateless operation)
+        self._cleanup_instance_if_needed(instance_uuid)
+
         return resp
 
 
     @token_required
-    @auto_cleanup_instance
     def _keep_alive_resource(self,instance_uuid):
         """
         This endpoint sets the "last accessed time" of the instance to the current time to prevent the instance from timeing out.
@@ -962,9 +1093,12 @@ class BptkServer(Flask):
 
         resp.headers['Content-Type'] = 'application/json'
         resp.headers['Access-Control-Allow-Origin']='*'
+
+        # Cleanup instance if needed (for stateless operation)
+        self._cleanup_instance_if_needed(instance_uuid)
+
         return resp
 
-    @token_required
     def _ensure_instance_exists(self, instance_uuid) -> bool:
         if self._instance_manager.is_valid_instance(instance_uuid):
             return True

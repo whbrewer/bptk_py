@@ -194,6 +194,13 @@ class FileAdapter(ExternalStateAdapter):
         try:
             os.remove(file_path)
             log(f"[INFO] Instance {instance_uuid} deleted successfully")
+        except FileNotFoundError as e:
+            # Check if the directory exists - if not, this is a configuration error
+            if not os.path.exists(self.path):
+                log(f"[ERROR] Error deleting instance {instance_uuid}: {str(e)}")
+                raise
+            # Otherwise, the file just doesn't exist (instance was in-memory only)
+            log(f"[INFO] Instance {instance_uuid} not found in file adapter (may have been in-memory only)")
         except Exception as e:
             log(f"[ERROR] Error deleting instance {instance_uuid}: {str(e)}")
             raise

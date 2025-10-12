@@ -75,6 +75,72 @@ def disable_logfire():
     log("[INFO] Logfire logging disabled")
 
 
+class FallbackSpan:
+    """Fallback context manager for creating spans without Logfire."""
+
+    def __init__(self, name, **attributes):
+        self.name = name
+        self.attributes = attributes
+        self.start_time = None
+
+    def __enter__(self):
+        """Start the span."""
+        # Log the span start
+        attr_str = ", ".join(f"{k}={v}" for k, v in self.attributes.items())
+        if attr_str:
+            log(f"[INFO] SPAN_START: {self.name} ({attr_str})")
+        else:
+            log(f"[INFO] SPAN_START: {self.name}")
+
+        # Track timing
+        self.start_time = datetime.datetime.now()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """End the span."""
+        # Calculate duration
+        duration_ms = None
+        if self.start_time:
+            duration = datetime.datetime.now() - self.start_time
+            duration_ms = duration.total_seconds() * 1000
+
+        # Log the span end
+        if duration_ms is not None:
+            log(f"[INFO] SPAN_END: {self.name} (duration={duration_ms:.2f}ms)")
+        else:
+            log(f"[INFO] SPAN_END: {self.name}")
+
+        return False  # Don't suppress exceptions
+
+
+def span(name, **attributes):
+    """
+    Create a span context manager for tracing operations.
+
+    Usage:
+        with logger.span("database_query", query_type="SELECT"):
+            # Your code here
+            pass
+
+    This will:
+    - Create a native Logfire span if Logfire is enabled
+    - Otherwise, create a fallback span that logs start/end times
+    """
+    global logfire_enabled
+
+    # If Logfire is enabled and available, return the actual Logfire span directly
+    if logfire_enabled and LOGFIRE_AVAILABLE:
+        try:
+            import logfire
+            # Return the native Logfire span - no wrapping needed
+            return logfire.span(name, **attributes)
+        except Exception as e:
+            log(f"[WARN] Failed to create Logfire span: {e}, falling back to basic span")
+
+    # Otherwise, return our fallback span
+    return FallbackSpan(name, **attributes)
+
+
 def log(message):
     """logs all log messages either to file or stdout"""
     message = message.replace("\n", "")

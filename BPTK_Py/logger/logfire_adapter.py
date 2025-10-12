@@ -55,7 +55,7 @@ class LogfireAdapter:
         Send a log message to Logfire.
 
         Args:
-            message: The log message (may contain [ERROR], [WARN], [INFO], [DEBUG] prefixes)
+            message: The log message (may contain [ERROR], [WARN], [INFO] prefixes)
         """
         if not self.configured:
             self._configure()
@@ -68,20 +68,22 @@ class LogfireAdapter:
             level = "WARN"
         elif "[INFO]" in message:
             level = "INFO"
-        elif "[DEBUG]" in message:
-            level = "DEBUG"
+      
 
         # Clean the message by removing the level brackets if present
         clean_message = message
-        for bracket_level in ["[ERROR]", "[WARN]", "[INFO]", "[DEBUG]"]:
+        for bracket_level in ["[ERROR]", "[WARN]", "[INFO]"]:
             clean_message = clean_message.replace(bracket_level, "").strip()
 
+        # Escape curly braces to prevent Logfire from interpreting them as format strings
+        # This is needed when logging dictionaries or JSON-like content
+        clean_message = clean_message.replace("{", "{{").replace("}", "}}")
+
         # Send to Logfire with appropriate level
+        # Pass the message directly without underscore parameters to avoid Logfire errors
         if level == "ERROR":
             logfire.error(clean_message)
         elif level == "WARN":
             logfire.warn(clean_message)
-        elif level == "DEBUG":
-            logfire.debug(clean_message)
         else:  # INFO or default
             logfire.info(clean_message)
