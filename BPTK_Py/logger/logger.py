@@ -126,8 +126,7 @@ def span(name, **attributes):
     - Create a native Logfire span if Logfire is enabled
     - Otherwise, create a fallback span that logs start/end times
     """
-    global logfire_enabled
-
+    
     # If Logfire is enabled and available, return the actual Logfire span directly
     if logfire_enabled and LOGFIRE_AVAILABLE:
         try:
