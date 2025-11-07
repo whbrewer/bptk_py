@@ -41,6 +41,10 @@ For any questions our suggestions you have regarding BPTK, please contact us at:
 
 ## Changelog
 
+### 2.2.2
+
+* Fix issue in external state adapter
+
 ### 2.2.1
 
 * Improve logfire logging.
