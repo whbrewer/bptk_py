@@ -1,0 +1,456 @@
+{
+  "radioisotopeSupplyChain": {
+    "type": "abm",
+    "name": "Radioisotope Supply Chain",
+    "model": "examples.radioisotope_supply_chain.model.RadioisotopeSupplyChain",
+    "scenarios": {
+      "baseline": {
+        "runspecs": {
+          "starttime": 0,
+          "stoptime": 240,
+          "dt": 1
+        },
+        "properties": {
+          "half_life_hours": {
+            "type": "Double",
+            "value": 66.0
+          },
+          "production_initial_inventory": {
+            "type": "Double",
+            "value": 200.0
+          },
+          "processing_initial_inventory": {
+            "type": "Double",
+            "value": 120.0
+          },
+          "distribution_initial_inventory": {
+            "type": "Double",
+            "value": 90.0
+          },
+          "end_user_initial_inventory": {
+            "type": "Double",
+            "value": 60.0
+          },
+          "decay_loss_weight": {
+            "type": "Double",
+            "value": 1.0
+          }
+        },
+        "agents": [
+          {
+            "name": "regulatory_node",
+            "count": 1,
+            "properties": {
+              "processing_delay_mean": {
+                "type": "Double",
+                "value": 1.0
+              },
+              "processing_delay_stddev": {
+                "type": "Double",
+                "value": 0.2
+              },
+              "transport_delay_mean": {
+                "type": "Double",
+                "value": 1.5
+              },
+              "transport_delay_stddev": {
+                "type": "Double",
+                "value": 0.3
+              },
+              "hold_probability": {
+                "type": "Double",
+                "value": 0.05
+              },
+              "hold_delay": {
+                "type": "Double",
+                "value": 4.0
+              }
+            }
+          },
+          {
+            "name": "end_user",
+            "count": 1,
+            "properties": {
+              "demand_mean": {
+                "type": "Double",
+                "value": 60.0
+              },
+              "demand_stddev": {
+                "type": "Double",
+                "value": 10.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 120.0
+              }
+            }
+          },
+          {
+            "name": "distribution_hub",
+            "count": 1,
+            "properties": {
+              "shipping_capacity": {
+                "type": "Double",
+                "value": 70.0
+              },
+              "transport_delay": {
+                "type": "Double",
+                "value": 6.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 150.0
+              }
+            }
+          },
+          {
+            "name": "processing_facility",
+            "count": 1,
+            "properties": {
+              "throughput": {
+                "type": "Double",
+                "value": 80.0
+              },
+              "processing_delay": {
+                "type": "Double",
+                "value": 4.0
+              },
+              "processing_yield": {
+                "type": "Double",
+                "value": 0.95
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 200.0
+              }
+            }
+          },
+          {
+            "name": "production_facility",
+            "count": 1,
+            "properties": {
+              "capacity": {
+                "type": "Double",
+                "value": 100.0
+              },
+              "variability": {
+                "type": "Double",
+                "value": 0.1
+              },
+              "outage_probability": {
+                "type": "Double",
+                "value": 0.01
+              },
+              "outage_duration": {
+                "type": "Double",
+                "value": 12.0
+              }
+            }
+          },
+          {
+            "name": "monitor",
+            "count": 1
+          }
+        ]
+      },
+      "reactor_outage": {
+        "runspecs": {
+          "starttime": 0,
+          "stoptime": 240,
+          "dt": 1
+        },
+        "properties": {
+          "half_life_hours": {
+            "type": "Double",
+            "value": 66.0
+          },
+          "production_initial_inventory": {
+            "type": "Double",
+            "value": 150.0
+          },
+          "processing_initial_inventory": {
+            "type": "Double",
+            "value": 90.0
+          },
+          "distribution_initial_inventory": {
+            "type": "Double",
+            "value": 70.0
+          },
+          "end_user_initial_inventory": {
+            "type": "Double",
+            "value": 50.0
+          },
+          "decay_loss_weight": {
+            "type": "Double",
+            "value": 1.0
+          }
+        },
+        "agents": [
+          {
+            "name": "regulatory_node",
+            "count": 1,
+            "properties": {
+              "processing_delay_mean": {
+                "type": "Double",
+                "value": 1.0
+              },
+              "processing_delay_stddev": {
+                "type": "Double",
+                "value": 0.2
+              },
+              "transport_delay_mean": {
+                "type": "Double",
+                "value": 1.5
+              },
+              "transport_delay_stddev": {
+                "type": "Double",
+                "value": 0.3
+              },
+              "hold_probability": {
+                "type": "Double",
+                "value": 0.05
+              },
+              "hold_delay": {
+                "type": "Double",
+                "value": 4.0
+              }
+            }
+          },
+          {
+            "name": "end_user",
+            "count": 1,
+            "properties": {
+              "demand_mean": {
+                "type": "Double",
+                "value": 60.0
+              },
+              "demand_stddev": {
+                "type": "Double",
+                "value": 10.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 130.0
+              }
+            }
+          },
+          {
+            "name": "distribution_hub",
+            "count": 1,
+            "properties": {
+              "shipping_capacity": {
+                "type": "Double",
+                "value": 70.0
+              },
+              "transport_delay": {
+                "type": "Double",
+                "value": 6.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 170.0
+              }
+            }
+          },
+          {
+            "name": "processing_facility",
+            "count": 1,
+            "properties": {
+              "throughput": {
+                "type": "Double",
+                "value": 80.0
+              },
+              "processing_delay": {
+                "type": "Double",
+                "value": 4.0
+              },
+              "processing_yield": {
+                "type": "Double",
+                "value": 0.95
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 220.0
+              }
+            }
+          },
+          {
+            "name": "production_facility",
+            "count": 1,
+            "properties": {
+              "capacity": {
+                "type": "Double",
+                "value": 100.0
+              },
+              "variability": {
+                "type": "Double",
+                "value": 0.15
+              },
+              "outage_probability": {
+                "type": "Double",
+                "value": 0.05
+              },
+              "outage_duration": {
+                "type": "Double",
+                "value": 24.0
+              }
+            }
+          },
+          {
+            "name": "monitor",
+            "count": 1
+          }
+        ]
+      },
+      "transport_delay": {
+        "runspecs": {
+          "starttime": 0,
+          "stoptime": 240,
+          "dt": 1
+        },
+        "properties": {
+          "half_life_hours": {
+            "type": "Double",
+            "value": 66.0
+          },
+          "production_initial_inventory": {
+            "type": "Double",
+            "value": 200.0
+          },
+          "processing_initial_inventory": {
+            "type": "Double",
+            "value": 120.0
+          },
+          "distribution_initial_inventory": {
+            "type": "Double",
+            "value": 90.0
+          },
+          "end_user_initial_inventory": {
+            "type": "Double",
+            "value": 60.0
+          },
+          "decay_loss_weight": {
+            "type": "Double",
+            "value": 1.0
+          }
+        },
+        "agents": [
+          {
+            "name": "regulatory_node",
+            "count": 1,
+            "properties": {
+              "processing_delay_mean": {
+                "type": "Double",
+                "value": 1.5
+              },
+              "processing_delay_stddev": {
+                "type": "Double",
+                "value": 0.4
+              },
+              "transport_delay_mean": {
+                "type": "Double",
+                "value": 3.0
+              },
+              "transport_delay_stddev": {
+                "type": "Double",
+                "value": 0.6
+              },
+              "hold_probability": {
+                "type": "Double",
+                "value": 0.1
+              },
+              "hold_delay": {
+                "type": "Double",
+                "value": 6.0
+              }
+            }
+          },
+          {
+            "name": "end_user",
+            "count": 1,
+            "properties": {
+              "demand_mean": {
+                "type": "Double",
+                "value": 60.0
+              },
+              "demand_stddev": {
+                "type": "Double",
+                "value": 10.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 140.0
+              }
+            }
+          },
+          {
+            "name": "distribution_hub",
+            "count": 1,
+            "properties": {
+              "shipping_capacity": {
+                "type": "Double",
+                "value": 70.0
+              },
+              "transport_delay": {
+                "type": "Double",
+                "value": 10.0
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 180.0
+              }
+            }
+          },
+          {
+            "name": "processing_facility",
+            "count": 1,
+            "properties": {
+              "throughput": {
+                "type": "Double",
+                "value": 80.0
+              },
+              "processing_delay": {
+                "type": "Double",
+                "value": 5.0
+              },
+              "processing_yield": {
+                "type": "Double",
+                "value": 0.95
+              },
+              "target_inventory": {
+                "type": "Double",
+                "value": 220.0
+              }
+            }
+          },
+          {
+            "name": "production_facility",
+            "count": 1,
+            "properties": {
+              "capacity": {
+                "type": "Double",
+                "value": 100.0
+              },
+              "variability": {
+                "type": "Double",
+                "value": 0.1
+              },
+              "outage_probability": {
+                "type": "Double",
+                "value": 0.01
+              },
+              "outage_duration": {
+                "type": "Double",
+                "value": 12.0
+              }
+            }
+          },
+          {
+            "name": "monitor",
+            "count": 1
+          }
+        ]
+      }
+    }
+  }
+}
