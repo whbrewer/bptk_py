@@ -1,4 +1,5 @@
 from BPTK_Py import bptk
+import pandas as pd
 
 
 def main():
@@ -20,7 +21,30 @@ def main():
         agent_property_types=["mean"],
         return_format="df",
     )
-    print(results.tail())
+    focus_metrics = ["backlog", "service_level", "decay_losses"]
+    focus_columns = [
+        column
+        for column in results.columns
+        if any(metric in column for metric in focus_metrics)
+    ]
+    stats = results[focus_columns].describe().transpose()
+    summary = stats.reset_index().rename(columns={"index": "series"})
+    split = summary["series"].str.split("_")
+    summary["scenario"] = split.str[1]
+    summary["metric"] = split.str[-2]
+    summary["property_type"] = split.str[-1]
+    summary = summary[
+        [
+            "scenario",
+            "metric",
+            "property_type",
+            "mean",
+            "std",
+            "min",
+            "max",
+        ]
+    ].sort_values(["scenario", "metric"])
+    print(summary.to_string(index=False))
 
 
 if __name__ == "__main__":
