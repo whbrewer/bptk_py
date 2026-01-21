@@ -18,7 +18,7 @@ def main():
             "decay_losses",
         ],
         agent_property_types=["mean"],
-        return_df=True,
+        return_format="df",
     )
     print(results.tail())
 
