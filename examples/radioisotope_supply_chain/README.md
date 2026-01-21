@@ -16,6 +16,14 @@ This example builds a hybrid ABM-style supply chain model for short-lived radioi
 From the repo root:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Then run:
+
+```bash
 python examples/radioisotope_supply_chain/run.py
 ```
 
